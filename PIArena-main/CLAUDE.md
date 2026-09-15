@@ -97,7 +97,7 @@ The `llm_judge` uses `Qwen/Qwen3-4B-Instruct-2507` by default (globally cached).
 
 **BaseDefense**: implement `execute(target_inst, context) -> dict` and optionally override `get_response(target_inst, context, llm) -> dict`.
 
-**BaseXAI**: implement `explain(target_inst, context, injected_task, **kwargs) -> dict`, keyed by the span(s) explained. See `piarena/xai/syntaxshap/` for a full example (SyntaxSHAP adapted to explain the `promptguard` classifier — `plans/xai-syntaxshap-promptguard.md` has the design rationale). Keep heavy imports (torch/transformers/spacy/...) lazy inside `explain`/a `_ensure_*` helper, not at module scope — `piarena.xai` is imported unconditionally by `main.py` so `--xai` stays genuinely opt-in.
+**BaseXAI**: implement `explain(target_inst, context, injected_task, **kwargs) -> dict`, keyed by the span(s) explained. Two coexisting examples of the same contract, both explaining the `promptguard` classifier: `piarena/xai/syntaxshap/` (`plans/xai-syntaxshap-promptguard.md` has the design rationale) and `piarena/xai/kernelshap/` (`plans/xai-kernelshap-promptguard.md`). Keep heavy imports (torch/transformers/spacy/captum/...) lazy inside `explain`/a `_ensure_*` helper, not at module scope — `piarena.xai` is imported unconditionally by `main.py` so `--xai` stays genuinely opt-in.
 
 Config merging: `DEFAULT_CONFIG` (class-level) is merged with `config` dict passed to constructor.
 

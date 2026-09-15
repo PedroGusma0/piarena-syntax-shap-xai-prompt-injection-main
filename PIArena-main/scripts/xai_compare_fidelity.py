@@ -27,7 +27,7 @@ Writes, under `--out-dir`:
 Usage:
     python scripts/xai_compare_fidelity.py \\
         --a-metrics results/evaluation_results/full_sweep/xai_metrics/squad_v2-...-syntaxshap-42_metrics.json --a-label syntaxshap \\
-        --b-metrics ../../piarena_xai_kernel_shap/PIArena-main/results/evaluation_results/full_sweep/xai_metrics/squad_v2-...-kernelshap-42_metrics.json --b-label kernelshap \\
+        --b-metrics results/evaluation_results/full_sweep/xai_metrics/squad_v2-...-kernelshap-42_metrics.json --b-label kernelshap \\
         --attack direct \\
         --out-dir results_comparison/direct
 """

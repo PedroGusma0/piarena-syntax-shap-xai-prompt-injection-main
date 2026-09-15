@@ -10,11 +10,12 @@
 # na mão só é necessário se quiser esse comportamento fora do orquestrador:
 #   nohup bash wandb_sync_loop.sh > logs/wandb_sync.log 2>&1 &
 #
-# Cada árvore (PIArena-main/ e piarena_xai_kernel_shap/PIArena-main/) escreve
-# seu próprio wandb/ local (main.py/scripts/*.py rodam com cwd diferente em
-# cada uma -- ver run_full_sweep.py's `cwd=tree_dir`), então o sync roda
-# dentro de cada uma separadamente -- um `wandb sync --sync-all` genérico na
-# raiz do workspace não acharia nenhuma delas.
+# PIArena-main/ escreve seu próprio wandb/ local (main.py/scripts/*.py rodam
+# com cwd=PIArena-main -- ver run_full_sweep.py), então o sync roda dentro
+# dela -- um `wandb sync --sync-all` genérico na raiz do workspace não a
+# acharia. (Antes do merge de piarena/xai/kernelshap/ de volta pra esta
+# árvore, syntaxshap e kernelshap viviam em duas árvores/dois `wandb/`
+# separados; este loop sincronizava as duas.)
 #
 # Uma falha de sync (rede caiu, `wandb login` ainda não foi feito) não pode
 # matar o loop nem, principalmente, a run principal -- por isso todo
@@ -27,20 +28,15 @@ set -uo pipefail   # sem -e: uma falha de sync não pode derrubar o loop
 cd "$(dirname "$0")"
 
 INTERVAL="${SYNC_INTERVAL_SECONDS:-300}"
-SYNTAXSHAP_DIR="PIArena-main"
-KERNELSHAP_DIR="piarena_xai_kernel_shap/PIArena-main"
+PIARENA_DIR="PIArena-main"
 
 echo "wandb_sync_loop.sh: sincronizando a cada ${INTERVAL}s (Ctrl+C ou SIGTERM pra parar)."
 
 while true; do
     ts="$(date +%H:%M:%S)"
-    if [ -d "$SYNTAXSHAP_DIR/wandb" ]; then
-        echo "[$ts] wandb sync ($SYNTAXSHAP_DIR)..."
-        (cd "$SYNTAXSHAP_DIR" && wandb sync --sync-all) || echo "[$ts] sync falhou em $SYNTAXSHAP_DIR (ok, tenta de novo no proximo ciclo)"
-    fi
-    if [ -d "$KERNELSHAP_DIR/wandb" ]; then
-        echo "[$ts] wandb sync ($KERNELSHAP_DIR)..."
-        (cd "$KERNELSHAP_DIR" && wandb sync --sync-all) || echo "[$ts] sync falhou em $KERNELSHAP_DIR (ok, tenta de novo no proximo ciclo)"
+    if [ -d "$PIARENA_DIR/wandb" ]; then
+        echo "[$ts] wandb sync ($PIARENA_DIR)..."
+        (cd "$PIARENA_DIR" && wandb sync --sync-all) || echo "[$ts] sync falhou em $PIARENA_DIR (ok, tenta de novo no proximo ciclo)"
     fi
     sleep "$INTERVAL"
 done

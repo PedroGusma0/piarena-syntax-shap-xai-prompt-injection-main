@@ -2,16 +2,16 @@
 # ============================================================================
 # Setup do pod (RunPod, ex.: A40 / imagem pytorch:*-cu128*-torch280-*) para
 # rodar o sweep completo (run_full_sweep.py: --xai syntaxshap E --xai
-# kernelshap, nas duas árvores PIArena-main/ e
-# piarena_xai_kernel_shap/PIArena-main/) num único venv compartilhado.
+# kernelshap, ambos hoje na mesma árvore PIArena-main/ -- piarena/xai/
+# kernelshap/ foi mesclado de volta de um checkout paralelo que existia só
+# durante o desenvolvimento) num único venv.
 #
 # Baseado em `experimento-kernel-shap/setup_pod_kernelshap.sh` -- o processo
 # que REALMENTE funcionou rodando o pilot kernelshap num pod de verdade (ver
-# run_rodando.txt) -- estendido aqui pra cobrir as duas árvores de uma vez,
-# não só a do kernelshap. Os passos 1-3, 5, 7-10 e 13 abaixo são
-# essencialmente os mesmos daquele script (mesmos obstáculos reais, mesmas
-# soluções); o resto (spacy, captum, requirements.txt combinado, instalação
-# editável) é novo, pra cobrir a árvore syntaxshap também.
+# run_rodando.txt) -- estendido aqui pra cobrir os dois métodos XAI de uma
+# vez, não só o kernelshap (mesmos obstáculos reais de vllm/fschat/CUDA,
+# mesmas soluções; o resto -- spacy, requirements.txt combinado com captum,
+# instalação editável -- é novo, pra cobrir o syntaxshap também).
 #
 # Uso:
 #   bash setup_venv.sh
@@ -19,7 +19,7 @@
 #   TORCH_INDEX_URL=https://download.pytorch.org/whl/cu121 bash setup_venv.sh   # só usado se o torch do sistema não estiver disponível (passo 3)
 #   HF_TOKEN="hf_..." bash setup_venv.sh             # pula o login interativo
 #
-# Depois de rodar, ative o venv (as duas árvores usam o mesmo) e rode:
+# Depois de rodar, ative o venv e rode:
 #   source .venv/bin/activate
 #   python run_full_sweep.py
 #
@@ -72,18 +72,6 @@
 # vllm` quebra com "ImportError: libcudart.so.13: cannot open shared object
 # file". O passo 8 resolve isso e persiste no `activate` do venv.
 #
-# --- Por que só UMA árvore fica com `pip install -e .` ---
-# PIArena-main/ e piarena_xai_kernel_shap/PIArena-main/ têm cada uma seu
-# próprio pacote `piarena/` (a segunda com piarena/xai/kernelshap/ em vez de
-# piarena/xai/syntaxshap/) -- MESMO NOME de pacote, então só uma pode ser a
-# instalação editável do venv por vez (passo 12 só instala a de
-# PIArena-main/). Isso não quebra `run_full_sweep.py`: ele seta PYTHONPATH
-# pra árvore certa em cada subprocesso (ver `_env_for()` nele), então
-# `main.py`/`scripts/*.py` sempre importam o `piarena` da pasta certa, não
-# importa qual delas está "editável" no venv. Rodar `scripts/xai_metrics.py`
-# manualmente dentro da árvore kernelshap (fora do orquestrador) precisa do
-# mesmo cuidado:
-#   cd piarena_xai_kernel_shap/PIArena-main && PYTHONPATH="$(pwd)" python scripts/xai_metrics.py ...
 # ============================================================================
 set -euo pipefail
 cd "$(dirname "$0")"   # -> raiz do workspace
@@ -92,8 +80,7 @@ VENV_DIR="${VENV_DIR:-.venv}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 TORCH_VERSION="${TORCH_VERSION:-2.8.0}"                                    # só usado no fallback do passo 3
 TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu128}"  # idem
-SYNTAXSHAP_DIR="$(pwd)/PIArena-main"
-KERNELSHAP_DIR="$(pwd)/piarena_xai_kernel_shap/PIArena-main"
+PIARENA_DIR="$(pwd)/PIArena-main"
 
 echo "=============================================="
 echo "1. Sanity check da GPU"
@@ -133,11 +120,11 @@ fi
 
 echo ""
 echo "=============================================="
-echo "4. Dependências da árvore syntaxshap (PIArena-main/requirements.txt --"
-echo "   cobre a base das duas árvores: transformers, spacy, pandas, shap,"
-echo "   matplotlib, fschat, etc., já sem vllm/torch soltos)"
+echo "4. Dependências (PIArena-main/requirements.txt -- transformers, spacy,"
+echo "   pandas, captum, shap, matplotlib, fschat, etc. para os dois métodos"
+echo "   XAI, já sem vllm/torch soltos)"
 echo "=============================================="
-pip install -r "$SYNTAXSHAP_DIR/requirements.txt"
+pip install -r "$PIARENA_DIR/requirements.txt"
 
 echo ""
 echo "=============================================="
@@ -147,14 +134,7 @@ pip install "fschat[model_worker,webui]"
 
 echo ""
 echo "=============================================="
-echo "6. captum (único pacote extra que a árvore kernelshap precisa além do"
-echo "   requirements.txt acima -- kernelshap backend='captum', o default)"
-echo "=============================================="
-pip install captum
-
-echo ""
-echo "=============================================="
-echo "7. vllm, sem pin, DENTRO do venv (import eager de datafilter/"
+echo "6. vllm, sem pin, DENTRO do venv (import eager de datafilter/"
 echo "   strategy_search -- ver nota no cabeçalho)"
 echo "=============================================="
 TORCH_BEFORE_VLLM="$(python -c 'import torch; print(torch.__version__)' 2>/dev/null || echo '')"
@@ -220,7 +200,7 @@ fi
 
 echo ""
 echo "=============================================="
-echo "8. Corrigindo o LD_LIBRARY_PATH pras libs CUDA que o vllm carrega em"
+echo "7. Corrigindo o LD_LIBRARY_PATH pras libs CUDA que o vllm carrega em"
 echo "   runtime (libcudart.so.*, libcublas.so.*, etc., instaladas pelos"
 echo "   pacotes pip nvidia-* dentro de site-packages/nvidia/<nome>/lib/)"
 echo "=============================================="
@@ -249,7 +229,7 @@ fi
 
 echo ""
 echo "=============================================="
-echo "9. Confirmando que o vllm importa (é o que mais dá problema)"
+echo "8. Confirmando que o vllm importa (é o que mais dá problema)"
 echo "=============================================="
 python -c "import vllm" && echo "vllm importou OK." || {
     echo "ERRO: vllm ainda não importa mesmo depois do fix do LD_LIBRARY_PATH." >&2
@@ -262,7 +242,7 @@ python -c "import vllm" && echo "vllm importou OK." || {
 
 echo ""
 echo "=============================================="
-echo "10. Confirmando que a GPU continua visível pro torch depois de tudo"
+echo "9. Confirmando que a GPU continua visível pro torch depois de tudo"
 echo "=============================================="
 python -c "
 import torch
@@ -276,20 +256,19 @@ else:
 
 echo ""
 echo "=============================================="
-echo "11. Modelo do spaCy (árvore syntaxshap: get_token_dependency_tree)"
+echo "10. Modelo do spaCy (--xai syntaxshap: get_token_dependency_tree)"
 echo "=============================================="
 python -m spacy download en_core_web_sm
 
 echo ""
 echo "=============================================="
-echo "12. pip install -e PIArena-main (conveniência pra rodar scripts/*.py na"
-echo "    mão -- só a árvore syntaxshap, ver nota no cabeçalho)"
+echo "11. pip install -e PIArena-main (conveniência pra rodar scripts/*.py na mão)"
 echo "=============================================="
-pip install -e "$SYNTAXSHAP_DIR"
+pip install -e "$PIARENA_DIR"
 
 echo ""
 echo "=============================================="
-echo "13. Login no Hugging Face (meta-llama/Prompt-Guard-86M é gated)"
+echo "12. Login no Hugging Face (meta-llama/Prompt-Guard-86M é gated)"
 echo "    Defina HF_TOKEN no ambiente antes de rodar este script pra pular"
 echo "    o prompt interativo, ex.: export HF_TOKEN=hf_xxx"
 echo "=============================================="
@@ -301,7 +280,7 @@ fi
 
 echo ""
 echo "=============================================="
-echo "14. Login no W&B (opcional agora -- NÃO é necessário pra gravar as runs"
+echo "13. Login no W&B (opcional agora -- NÃO é necessário pra gravar as runs"
 echo "    offline, só pro wandb_sync_loop.sh conseguir enviar depois pro"
 echo "    wandb.ai remoto). Defina WANDB_API_KEY no ambiente pra pular o"
 echo "    prompt interativo, ex.: export WANDB_API_KEY=xxxx. Pulando este"

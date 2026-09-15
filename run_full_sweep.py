@@ -6,6 +6,13 @@ run termina, e roda scripts/xai_compare_fidelity.py assim que os dois
 métodos tiverem métricas prontas pra aquele ataque. Retomável: pula
 qualquer etapa cuja saída já exista, a não ser que --force seja passado.
 
+Os dois métodos XAI vivem na MESMA árvore PIArena-main/ desde que
+piarena/xai/kernelshap/ foi mesclado de volta de um checkout paralelo
+(piarena_xai_kernel_shap/PIArena-main/, removido) — uma única instalação
+`piarena` no venv já resolve os dois, sem o malabarismo de PYTHONPATH que
+uma versão anterior deste script precisava pra escolher entre duas árvores
+com o mesmo nome de pacote.
+
 Ver o plano completo (sweep completo squad_v2 x 4 ataques x 2 métodos XAI)
 para o design/motivação de cada decisão aqui.
 
@@ -25,8 +32,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-SYNTAXSHAP_DIR = ROOT / "PIArena-main"
-KERNELSHAP_DIR = ROOT / "piarena_xai_kernel_shap" / "PIArena-main"
+PIARENA_DIR = ROOT / "PIArena-main"
 LOG_DIR = ROOT / "logs" / "full_sweep"
 
 ATTACKS = ["direct", "ignore", "combined", "completion"]
@@ -49,10 +55,10 @@ def _llm_name() -> str:
     return BACKEND_LLM.replace("/", "-")
 
 
-def result_path(tree_dir: Path, attack: str, xai: str) -> Path:
+def result_path(attack: str, xai: str) -> Path:
     """Reproduz exatamente o caminho que main.py monta (main.py:146-155)."""
     fname = f"{_dataset_name()}-{_llm_name()}-{attack}-{DEFENSE}-{xai}-{SEED}.json"
-    return tree_dir / "results" / "evaluation_results" / NAME / fname
+    return PIARENA_DIR / "results" / "evaluation_results" / NAME / fname
 
 
 def metrics_path(result_file: Path) -> Path:
@@ -64,20 +70,8 @@ def compare_report_path(attack: str) -> Path:
     return ROOT / "results_comparison" / attack / "syntaxshap_vs_kernelshap_fidelity_comparison_report.md"
 
 
-def _env_for(tree_dir: Path) -> dict:
-    """PIArena-main/ e piarena_xai_kernel_shap/PIArena-main/ são duas cópias
-    DIFERENTES do pacote `piarena` (uma tem piarena/xai/syntaxshap/, a outra
-    piarena/xai/kernelshap/), mas com o MESMO nome de pacote — num venv
-    único compartilhado pelas duas (setup_venv.sh), só uma delas pode ser a
-    instalação editável (`pip install -e .`) de cada vez. `main.py` não
-    depende disso (o Python já bota a pasta do próprio script no início do
-    sys.path), mas `scripts/*.py` sim (estão numa subpasta — sys.path[0]
-    vira `tree_dir/scripts`, não `tree_dir`). Prepender `tree_dir` ao
-    PYTHONPATH aqui garante que `import piarena` resolve pra árvore CERTA em
-    cada subprocesso, não importa qual ficou instalada no venv."""
+def _env() -> dict:
     env = os.environ.copy()
-    existing = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = str(tree_dir) + (os.pathsep + existing if existing else "")
     # Offline by default (writes locally, no live network dependency during
     # the actual expensive run) — respects an already-exported WANDB_MODE
     # from the user's shell instead of overriding it. See wandb_sync_loop.sh
@@ -96,7 +90,7 @@ def run_logged(cmd: list[str], cwd: Path, log_name: str) -> bool:
     with open(log_path, "a", encoding="utf-8") as log_file:
         log_file.write(f"\n=== {now.isoformat()} -- {' '.join(cmd)} ===\n")
         log_file.flush()
-        proc = subprocess.run(cmd, cwd=cwd, stdout=log_file, stderr=subprocess.STDOUT, env=_env_for(cwd))
+        proc = subprocess.run(cmd, cwd=cwd, stdout=log_file, stderr=subprocess.STDOUT, env=_env())
     ok = proc.returncode == 0
     status = "OK" if ok else f"FALHOU (exit {proc.returncode})"
     print(f"[{datetime.datetime.now():%H:%M:%S}] {status}: {log_name} -- ver {log_path}")
@@ -104,8 +98,7 @@ def run_logged(cmd: list[str], cwd: Path, log_name: str) -> bool:
 
 
 def run_main(attack: str, xai: str, force: bool) -> Path | None:
-    tree_dir = SYNTAXSHAP_DIR if xai == "syntaxshap" else KERNELSHAP_DIR
-    result_file = result_path(tree_dir, attack, xai)
+    result_file = result_path(attack, xai)
     if not force and metrics_path(result_file).exists():
         print(f"pula main.py ({attack}/{xai}): metricas ja existem em {metrics_path(result_file)}")
         return result_file
@@ -120,19 +113,20 @@ def run_main(attack: str, xai: str, force: bool) -> Path | None:
         "--name", NAME,
         "--seed", str(SEED),
     ]
-    ok = run_logged(cmd, cwd=tree_dir, log_name=f"{attack}_{xai}_main")
+    ok = run_logged(cmd, cwd=PIARENA_DIR, log_name=f"{attack}_{xai}_main")
     return result_file if ok else None
 
 
 def run_metrics(attack: str, xai: str, result_file: Path, force: bool) -> Path | None:
-    tree_dir = SYNTAXSHAP_DIR if xai == "syntaxshap" else KERNELSHAP_DIR
     out_metrics = metrics_path(result_file)
     if not force and out_metrics.exists():
         print(f"pula xai_metrics.py ({attack}/{xai}): ja existe em {out_metrics}")
         return out_metrics
 
+    # --xai-method não precisa ser passado -- scripts/xai_metrics.py infere
+    # o método do próprio sufixo "-{xai}-" no nome do arquivo de resultado.
     cmd = [sys.executable, "scripts/xai_metrics.py", "--result", str(result_file)]
-    ok = run_logged(cmd, cwd=tree_dir, log_name=f"{attack}_{xai}_metrics")
+    ok = run_logged(cmd, cwd=PIARENA_DIR, log_name=f"{attack}_{xai}_metrics")
     return out_metrics if ok and out_metrics.exists() else None
 
 
@@ -151,7 +145,7 @@ def run_compare(attack: str, syntaxshap_metrics: Path, kernelshap_metrics: Path,
     ]
     # xai_compare_fidelity.py é puro Python/numpy (sem torch/spacy) e vive em
     # PIArena-main/scripts/ -- roda a partir de lá.
-    run_logged(cmd, cwd=SYNTAXSHAP_DIR, log_name=f"{attack}_compare")
+    run_logged(cmd, cwd=PIARENA_DIR, log_name=f"{attack}_compare")
 
 
 def process_attack(attack: str, force: bool, do_syntaxshap: bool, do_kernelshap: bool) -> None:
@@ -197,10 +191,10 @@ def _start_wandb_sync_loop() -> subprocess.Popen | None:
     """Sobe wandb_sync_loop.sh em background, sem bloquear -- assim o painel
     do wandb.ai fica quase ao vivo durante o sweep inteiro sem precisar de
     SSH nem de lembrar de rodar `wandb sync` manualmente (ver o script pra
-    detalhes: um loop que roda `wandb sync --sync-all` dentro de cada
-    arvore, a cada poucos minutos, `|| true` pra uma falha de sync nunca
-    derrubar nada). Retorna None se o script nao existir (nao devia
-    acontecer, mas nao trava o sweep por isso)."""
+    detalhes: um loop que roda `wandb sync --sync-all` dentro da árvore, a
+    cada poucos minutos, `|| true` pra uma falha de sync nunca derrubar
+    nada). Retorna None se o script nao existir (nao devia acontecer, mas
+    nao trava o sweep por isso)."""
     script = ROOT / "wandb_sync_loop.sh"
     if not script.exists():
         print(f"aviso: {script} nao encontrado -- pulando o sync automatico do W&B.")

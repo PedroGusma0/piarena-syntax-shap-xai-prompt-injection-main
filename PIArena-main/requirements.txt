@@ -41,9 +41,12 @@ anthropic
 # --xai syntaxshap (see plans/xai-syntaxshap-promptguard.md)
 pandas          # get_token_dependency_tree (syntax-aware coalition tree)
 cloudpickle     # required by the vendored thirdparty/_serializable.py
-shap            # official shap package — used only for plots.text/plots.bar, not for computing values
+shap            # official shap package — plots.text/plots.bar for both --xai methods, and the "shap" backend of kernelshap's shap.KernelExplainer
 matplotlib      # shap.plots.bar rendering
 # spacy is already listed above; also run once: python -m spacy download en_core_web_sm
+
+# --xai kernelshap (see plans/xai-kernelshap-promptguard.md)
+captum          # captum.attr.KernelShap — computes Shapley values (backend="captum", the default; shap/matplotlib already listed above)
 
 # W&B logging (main.py, scripts/xai_metrics.py, scripts/xai_compare_fidelity.py
 # — opt-out via --no-wandb). WANDB_MODE=offline by default (see

@@ -10,9 +10,12 @@ register_xai = XAI_REGISTRY.register
 class BaseXAI(ABC):
     """Base class for all explainability (XAI) methods in PIArena.
 
-    Third plugin type alongside BaseAttack/BaseDefense, added specifically
-    to support explaining defense decisions (starting with `promptguard`) —
-    see plans/xai-syntaxshap-promptguard.md for the design rationale.
+    Third plugin type alongside BaseAttack/BaseDefense, added to explain
+    defense decisions (starting with `promptguard`). See
+    `piarena/xai/syntaxshap/` and `piarena/xai/kernelshap/` for two worked
+    examples of the same contract, and `plans/xai-syntaxshap-promptguard.md`/
+    `plans/xai-kernelshap-promptguard.md` for their respective design
+    rationale.
     """
 
     name: str

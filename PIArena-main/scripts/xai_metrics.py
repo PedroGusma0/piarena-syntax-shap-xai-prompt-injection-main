@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Compute pilot metrics + saliency-map plots for a `--xai syntaxshap` run.
+"""Compute pilot metrics + saliency-map plots for a `--xai` run — works for
+both `syntaxshap` and `kernelshap` result files (see `--xai-method` below).
 
 Reads the evaluation-result JSON `main.py` already wrote (it has, per sample,
 `xai_result.context` — tokens/values/injected_span — and
@@ -23,14 +24,27 @@ The ASR/Utility summary, by contrast, is computed over the *whole* raw result
 (every sample, blocked or not) — it's the benchmark-level context the
 per-sample XAI metrics sit inside.
 
+This script used to exist as two near-identical copies (one per `--xai`
+method — same CLI, same metrics, same plots, differing only in which
+explainer builds `rescore_fn`) before `piarena/xai/syntaxshap/` and
+`piarena/xai/kernelshap/` were merged back into one PIArena tree. `--xai-method`
+picks the explainer; "auto" (default) infers it from `--result`'s filename,
+which `main.py` itself always suffixes with `-{xai}-` (see main.py's
+`evaluation_result_path`).
+
 See "Onde e como as métricas aparecem" and "Gráficos" in
-plans/xai-syntaxshap-promptguard.md for the full design/format.
+plans/xai-syntaxshap-promptguard.md / plans/xai-kernelshap-promptguard.md for
+the full design/format (identical between the two methods, method-specific
+notes called out inline in each doc).
 
 Usage:
     python scripts/xai_metrics.py \\
         --result results/evaluation_results/xai_pilot/squad_v2-...-syntaxshap-42.json \\
         --model-name meta-llama/Prompt-Guard-86M --algorithm syntax \\
         --thresholds 0.1 0.2 0.3 0.5
+
+    python scripts/xai_metrics.py \\
+        --result results/evaluation_results/xai_pilot/squad_v2-...-kernelshap-42.json
 """
 import argparse
 import json
@@ -46,18 +60,40 @@ from piarena.xai.metrics import (
     injected_span_percentile,
 )
 
+_XAI_METHODS = ("syntaxshap", "kernelshap")
+
 
 def parse_args():
-    p = argparse.ArgumentParser(description=__doc__)
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--result", required=True, help="Path to main.py's evaluation-result JSON.")
+    p.add_argument("--xai-method", default="auto", choices=["auto", *_XAI_METHODS],
+                    help="Which explainer produced --result. 'auto' (default) infers it from the "
+                         "filename's -{xai}- suffix (main.py's own naming convention).")
     p.add_argument("--model-name", default="meta-llama/Prompt-Guard-86M")
-    p.add_argument("--algorithm", default="syntax", choices=["syntax", "shap"])
+    p.add_argument("--algorithm", default="syntax", choices=["syntax", "shap"],
+                    help="syntaxshap-only: tree-restricted ('syntax') vs. unrestricted ('shap') coalition "
+                         "enumeration. Ignored for --xai-method kernelshap.")
     p.add_argument("--thresholds", type=float, nargs="+", default=[0.1, 0.2, 0.3, 0.5])
     p.add_argument("--out-dir", default=None, help="Default: <result dir>/xai_metrics/")
     p.add_argument("--max-plot-samples", type=int, default=25, help="Cap on samples rendered into saliency_maps.html.")
     p.add_argument("--no-wandb", action="store_true",
                     help="Disable W&B logging (on by default). WANDB_MODE=offline unless already set in the environment.")
     return p.parse_args()
+
+
+def _infer_xai_method(result_path: str) -> str:
+    """Parses the `-{xai}-` suffix out of main.py's own filename convention
+    (`{dataset}-{llm}-{attack}-{defense}-{xai}-{seed}.json`) — same idea as
+    `_guess_attack` below, just for the XAI method instead of the attack."""
+    stem = os.path.splitext(os.path.basename(result_path))[0]
+    parts = set(stem.split("-"))
+    found = [m for m in _XAI_METHODS if m in parts]
+    if len(found) == 1:
+        return found[0]
+    raise ValueError(
+        f"Could not infer --xai-method from filename {result_path!r} "
+        f"(found {found!r} of {_XAI_METHODS}) — pass --xai-method explicitly."
+    )
 
 
 def _guess_attack(result_path: str | None) -> str:
@@ -81,19 +117,39 @@ def load_json(path):
         return json.load(f)
 
 
-def build_rescorers(explainer):
-    """Return a `rescore_p_malign` closure bound to a given `context` string,
-    matching exactly the masking mechanism ClassifierSyntaxExplainer itself
-    uses (same `_mask_to_string`/`_score`)."""
-    def make(context):
-        def rescore_p_malign(keep_mask: np.ndarray) -> float:
-            return explainer._score(explainer._mask_to_string(keep_mask, context))
+def _load_explainer(xai_method: str, model_name: str, algorithm: str):
+    """Returns `(explainer, make_rescorer)` — `make_rescorer(context)` builds
+    a `rescore_fn(keep_mask) -> float` closure using exactly the masking
+    mechanism the given method's own explainer uses. Deferred, heavy imports
+    (torch/transformers/spacy/captum) — only paid once metrics actually run,
+    and only for whichever one method this call needs."""
+    if xai_method == "syntaxshap":
+        from piarena.xai.syntaxshap.classifier_explainer import ClassifierSyntaxExplainer
+        from piarena.xai.syntaxshap.xai_syntaxshap import _load_classifier_pipeline
+        from piarena.xai.syntaxshap.thirdparty.models import TransformersPipeline  # noqa (path already set up by classifier_explainer import)
 
-        return rescore_p_malign
-    return make
+        tokenizer, raw_pipeline = _load_classifier_pipeline(model_name)
+        explainer = ClassifierSyntaxExplainer(TransformersPipeline(raw_pipeline), tokenizer, algorithm=algorithm)
+
+        def make_rescorer(context):
+            def rescore_p_malign(keep_mask: np.ndarray) -> float:
+                return explainer._score(explainer._mask_to_string(keep_mask, context))
+            return rescore_p_malign
+
+        return explainer, make_rescorer
+
+    # kernelshap
+    from piarena.xai.kernelshap.classifier_explainer import ClassifierKernelExplainer
+    from piarena.xai.kernelshap.xai_kernelshap import _load_classifier
+
+    tokenizer, model = _load_classifier(model_name)
+    # `backend=` doesn't matter here — re-scoring (make_rescorer) never calls
+    # captum or shap, it only runs the model directly. Left at the default.
+    explainer = ClassifierKernelExplainer(model, tokenizer)
+    return explainer, explainer.make_rescorer
 
 
-def compute_one(sample, explainer, make_rescorers, thresholds):
+def compute_one(sample, make_rescorer, thresholds):
     xai = sample.get("xai_result", {}).get("context")
     defense_result = sample.get("defense_result", {})
     context = sample.get("injected_context")
@@ -104,7 +160,7 @@ def compute_one(sample, explainer, make_rescorers, thresholds):
     full_value = xai["full_value"]
     injected_span = xai.get("injected_span")
 
-    rescore_p = make_rescorers(context)
+    rescore_p = make_rescorer(context)
 
     entry = {
         "predicted_label": xai.get("predicted_label"),
@@ -112,12 +168,18 @@ def compute_one(sample, explainer, make_rescorers, thresholds):
         # fallback so result files from before the malign rename still parse
         # correctly.
         "p_malign": xai.get("p_malign", xai.get("p_non_benign", full_value)),
+        # method-specific metadata: "backend" (kernelshap) comes back None
+        # for a syntaxshap result and vice versa for "timed_out" below —
+        # simpler (and W&B-safe) than branching on xai_method here.
+        "backend": xai.get("backend"),
         "detect_flag": defense_result.get("detect_flag"),
         "fidelity": fidelity(full_value, values, rescore_p, thresholds),
         "acc_at_1": acc_at_1(full_value, values, rescore_p, thresholds),
         # False/absent for every sample computed before the per-sample
-        # timeout existed (ClassifierSyntaxExplainer.explain_context) — only
-        # ever True here, never a KeyError, for older result files.
+        # timeout existed (ClassifierSyntaxExplainer.explain_context) and for
+        # every kernelshap sample (that explainer never sets this field at
+        # all, its cost is bounded by n_samples, not text structure) — only
+        # ever True for a syntaxshap sample that actually hit the timeout.
         "timed_out": bool(xai.get("timed_out", False)),
     }
     if injected_span is not None:
@@ -162,25 +224,19 @@ def _asr_utility_summary(result: dict) -> dict:
 def main():
     args = parse_args()
     result = load_json(args.result)
+    xai_method = args.xai_method if args.xai_method != "auto" else _infer_xai_method(args.result)
 
     out_dir = args.out_dir or os.path.join(os.path.dirname(args.result), "xai_metrics")
     plots_dir = os.path.join(out_dir, "plots")
     os.makedirs(plots_dir, exist_ok=True)
 
-    # Deferred, heavy imports — only needed once we actually run metrics.
-    from piarena.xai.syntaxshap.classifier_explainer import ClassifierSyntaxExplainer
-    from piarena.xai.syntaxshap.xai_syntaxshap import _load_classifier_pipeline
-    from piarena.xai.syntaxshap.thirdparty.models import TransformersPipeline  # noqa (path already set up by classifier_explainer import)
-
-    tokenizer, raw_pipeline = _load_classifier_pipeline(args.model_name)
-    explainer = ClassifierSyntaxExplainer(TransformersPipeline(raw_pipeline), tokenizer, algorithm=args.algorithm)
-    make_rescorers = build_rescorers(explainer)
+    explainer, make_rescorer = _load_explainer(xai_method, args.model_name, args.algorithm)
 
     per_sample = {}
     t0 = time.time()
     n_done = 0
     for idx, sample in result.items():
-        entry = compute_one(sample, explainer, make_rescorers, args.thresholds)
+        entry = compute_one(sample, make_rescorer, args.thresholds)
         if entry is None:
             continue
         per_sample[idx] = entry
@@ -198,8 +254,12 @@ def main():
     metrics_out = {
         "meta": {
             "result_path": args.result,
+            "xai_method": xai_method,
             "model_name": args.model_name,
-            "algorithm": args.algorithm,
+            # None for kernelshap (algorithm only applies to syntaxshap's
+            # coalition enumeration) rather than omitted, so downstream
+            # consumers can rely on the key always being present.
+            "algorithm": args.algorithm if xai_method == "syntaxshap" else None,
             "thresholds": args.thresholds,
             "n_samples": n_done,
         },
@@ -218,7 +278,7 @@ def main():
     print(f"Wrote {report_path}")
 
     try:
-        _render_plots(result, per_sample, plots_dir, max_samples=args.max_plot_samples)
+        _render_plots(result, per_sample, plots_dir, xai_method, max_samples=args.max_plot_samples)
     except ImportError as e:
         print(f"Skipping plots (shap/matplotlib not installed): {e}")
 
@@ -231,8 +291,8 @@ def _log_to_wandb(metrics_out, per_sample, plots_dir, thresholds):
     (not resuming) the `wandb.init(job_type="run", ...)` `main.py` itself may
     have done for the same result file (keeps this script runnable
     standalone, without needing to know/pass a run id across processes);
-    grouped by attack so the two show up together in the W&B UI. See the
-    plan's "Parte 3"."""
+    grouped by attack so runs from both --xai methods show up together in
+    the W&B UI."""
     os.environ.setdefault("WANDB_MODE", "offline")
     try:
         import wandb
@@ -246,7 +306,7 @@ def _log_to_wandb(metrics_out, per_sample, plots_dir, thresholds):
         project=os.environ.get("WANDB_PROJECT", "piarena-xai-sweep"),
         group=attack,
         job_type="metrics",
-        name=f"{attack}-syntaxshap-metrics",
+        name=f"{attack}-{meta['xai_method']}-metrics",
         config=meta,
     )
 
@@ -319,8 +379,12 @@ def _aggregate(per_sample, thresholds):
 def _render_report(metrics_out) -> str:
     meta = metrics_out["meta"]
     agg = metrics_out["aggregate"]
+    title = f"# XAI pilot report — {meta['xai_method']}"
+    if meta.get("algorithm"):
+        title += f" ({meta['algorithm']})"
+    title += f" ({meta['model_name']})"
     lines = [
-        f"# XAI pilot report — {meta['algorithm']} ({meta['model_name']})",
+        title,
         "",
         f"- Result file: `{meta['result_path']}`",
         f"- Samples explained (blocked by the defense): {meta['n_samples']}",
@@ -368,13 +432,12 @@ def _render_report(metrics_out) -> str:
     return "\n".join(lines)
 
 
-def _render_plots(result, per_sample, plots_dir, max_samples=25):
+def _render_plots(result, per_sample, plots_dir, xai_method, max_samples=25):
     import shap  # official shap package — plotting only, not computation
     import matplotlib
     matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
 
-    html_parts = ["<html><head><meta charset='utf-8'><title>SyntaxSHAP saliency maps</title></head><body>"]
+    html_parts = [f"<html><head><meta charset='utf-8'><title>{xai_method} saliency maps</title></head><body>"]
     n = 0
     for idx, sample in result.items():
         xai = sample.get("xai_result", {}).get("context")
@@ -436,7 +499,7 @@ def _render_fidelity_acc_bars(per_sample, plots_dir):
     ax.bar(x + width / 2, acc_means, width, label="acc@1(t)")
     ax.set_xticks(x)
     ax.set_xticklabels(thresholds)
-    ax.set_xlabel("t (top-t% tokens kept)")
+    ax.set_xlabel("t (top-t% tokens/words kept)")
     ax.set_ylabel("mean value")
     ax.set_title("Fidelity(t) / acc@1(t) — blocked samples")
     ax.legend()

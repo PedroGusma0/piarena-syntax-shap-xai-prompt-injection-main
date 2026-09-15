@@ -70,7 +70,7 @@ from . import my_defense  # noqa: F401
 
 ## Add A New XAI Method
 
-Third plugin type (`XAI_REGISTRY`, `piarena/registry.py`), added to explain defense decisions — see `piarena/xai/syntaxshap/` and `plans/xai-syntaxshap-promptguard.md` for a full worked example (SyntaxSHAP adapted for the `promptguard` classifier).
+Third plugin type (`XAI_REGISTRY`, `piarena/registry.py`), added to explain defense decisions — see `piarena/xai/syntaxshap/` and `plans/xai-syntaxshap-promptguard.md` for a full worked example (SyntaxSHAP adapted for the `promptguard` classifier), or `piarena/xai/kernelshap/` and `plans/xai-kernelshap-promptguard.md` for a second, independent one (Kernel SHAP adapted for the same classifier) — both coexist in the same `XAI_REGISTRY`, selected via `--xai`.
 
 Create a file such as `piarena/xai/my_xai/xai_my_xai.py`:
 
@@ -137,7 +137,7 @@ def explain(self, target_inst, context, injected_task, **kwargs) -> dict:
     ...
 ```
 
-An XAI method returns a dict keyed by the span(s) it explained (e.g. `"context"`, `"injected_task"`), each value itself method-specific (SyntaxSHAP returns `tokens`/`values`/`base_value`/`full_value` — see [docs/xai/syntaxshap.md](xai/syntaxshap.md)).
+An XAI method returns a dict keyed by the span(s) it explained (e.g. `"context"`, `"injected_task"`), each value itself method-specific (SyntaxSHAP and Kernel SHAP both return `tokens`/`values`/`base_value`/`full_value` — see [docs/xai/syntaxshap.md](xai/syntaxshap.md)/[docs/xai/kernelshap.md](xai/kernelshap.md)).
 
 ## Keep New Docs Consistent
 
