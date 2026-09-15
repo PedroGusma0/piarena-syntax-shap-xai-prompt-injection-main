@@ -1,0 +1,94 @@
+\documentclass{article}
+
+\usepackage[brazil]{babel}    % português do Brasil
+\usepackage[utf8]{inputenc}   % acentos no UTF-8
+\usepackage[T1]{fontenc}      % para hifenização correta
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{tabularx}
+\usepackage{placeins}
+\usepackage{xcolor}
+\usepackage{xltabular}
+\usepackage{subcaption}
+\usepackage{caption}
+\usepackage{amsmath}
+\usepackage{listings}
+% pacotes adicionais necessários apenas para citação/estrutura (mesmo padrão de tex_syntaxshap_standalone.tex)
+\usepackage{float}
+\usepackage[style=authoryear, backend=biber]{biblatex}
+\addbibresource{referencias_syntaxshap.bib}
+\usepackage{hyperref}
+
+\lstdefinestyle{promptstyle}{
+    basicstyle=\ttfamily\small,
+    backgroundcolor=\color{gray!5},
+    frame=single,
+    rulecolor=\color{gray!50},
+    breaklines=true,
+    columns=fullflexible,
+    keepspaces=true,
+    xleftmargin=0.5em,
+    xrightmargin=0.5em
+}
+
+\renewcommand{\arraystretch}{1.5}
+\captionsetup{font=small}
+\setlength{\parskip}{0.5em}
+
+\title{Adicionando um motor de explicabilidade ao PI Arena}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Desafios do SyntaxSHAP}
+\label{sec:desafios-syntaxshap}
+
+O SyntaxSHAP \parencite{amara2024syntaxshap} foi escolhido como motor de explicabilidade do experimento por restringir as coalizões do jogo de Shapley à estrutura sintática da árvore de dependência da sentença, produzindo explicações mais coerentes gramaticalmente do que perturbações puramente aleatórias. Essa mesma restrição estrutural, no entanto, é a origem de um conjunto de desafios práticos que se tornam centrais ao tentar aplicar o método fora do cenário em que foi originalmente proposto e avaliado — sentenças isoladas, curtas, em inglês, explicando um único LLM autoregressivo. Esta seção documenta esses desafios, tanto os já reconhecidos pelos próprios autores quanto os que se manifestaram concretamente ao adaptar o método para explicar o classificador PromptGuard sobre os \texttt{context}s (tipicamente longos e multi-sentença) do PI Arena.
+
+\subsection{Custo computacional exponencial}
+\label{sec:custo-exponencial}
+
+O ponto de partida do SyntaxSHAP é o cálculo exato dos valores de Shapley \parencite{shapley1953value}, cujo custo computacional já é, por si só, o principal obstáculo prático do método: calcular o valor de Shapley de uma única \textit{feature} exige enumerar todas as coalizões que podem ou não incluí-la, custando $O(2^n)$; repetir esse processo para as $n$ features de entrada eleva o custo total para $O(n \cdot 2^n)$.
+
+O SyntaxSHAP não elimina essa exponencialidade — apenas a reduz ao restringir, em cada nível $l$ da árvore de dependência, a enumeração de coalizões às $n_l$ palavras daquele nível, em vez das $n$ palavras da sentença inteira. Para uma árvore com $L$ níveis, os próprios autores derivam uma complexidade aproximada de $O(n \cdot L \cdot 2^{n/L})$ (Apêndice B.2 de \cite{amara2024syntaxshap}). O termo relevante no expoente deixa de ser $n$ e passa a ser $n/L$: quanto mais níveis a árvore tiver (isto é, quanto mais \textit{profunda} e distribuída ela for), menor o expoente e maior o ganho sobre o Shapley exato. O custo, portanto, \textbf{ainda é exponencial} — e o expoente que o rege não é o tamanho do texto, mas a largura do nível mais largo da árvore de dependência, um dado que depende inteiramente de \emph{como} a sentença está estruturada sintaticamente, não de \emph{quão longa} ela é.
+
+Essa dependência do formato da árvore, e não do tamanho do texto, foi confirmada empiricamente ao instrumentar a implementação usada neste experimento (\texttt{coalition.py}) contra sentenças reais do dataset \texttt{squad\_v2} do PI Arena: duas amostras de comprimento quase idêntico (700--750 caracteres) chegaram a diferir em \textbf{oito ordens de grandeza} no número de \textit{forward passes} exigidos, uma vez que uma delas continha uma sentença cuja árvore tinha um nível excepcionalmente largo. Ou seja, \texttt{--limit N} ou o comprimento da amostra não são \emph{proxies} confiáveis de custo computacional — o único preditor real é a estrutura da árvore de dependência de cada sentença, que só é conhecida após o parsing.
+
+\subsection{Dependência do balanceamento da árvore}
+\label{sec:balanceamento}
+
+O ganho de $O(n \cdot 2^n)$ para $O(n \cdot L \cdot 2^{n/L})$ só se realiza plenamente quando a árvore de dependência é \emph{balanceada} — isto é, quando as $n$ palavras da sentença se distribuem de forma razoavelmente uniforme entre os $L$ níveis. No pior caso, uma árvore degenerada (por exemplo, majoritariamente achatada, com a maior parte das palavras concentrada em um único nível largo) faz $n/L$ se aproximar de $n$, e o custo do SyntaxSHAP converge de volta para o mesmo $O(n \cdot 2^n)$ do Shapley exato que o método pretendia evitar. O ganho assintótico do método é, portanto, condicional à geometria da árvore sintática de cada sentença — uma propriedade que varia caso a caso e não pode ser assumida a priori, sobretudo em texto real fora do domínio controlado (sentenças curtas, gramaticalmente simples) em que o método foi avaliado.
+
+Isso sugere uma mitigação óbvia — reequilibrar artificialmente a árvore para achatar os níveis mais largos — que esbarra, porém, em uma contradição de propósito: a premissa central do SyntaxSHAP é que os níveis da árvore \emph{significam} algo linguisticamente (relações reais de dependência entre núcleo e modificadores), e é exatamente esse alinhamento com a sintaxe real que torna as coalizões permitidas mais coerentes do que agrupamentos arbitrários de palavras. Redistribuir palavras entre níveis apenas para equilibrar a largura da árvore romperia essa correspondência com a estrutura gramatical real da sentença, esvaziando a justificativa do método em relação a alternativas mais simples (LIME, SHAP padrão). Existe, portanto, uma tensão de fundo entre tratabilidade computacional e fidelidade sintática que não é resolvida pelo desenho original do método — permanece uma questão em aberto se um limite de largura por nível (por exemplo, amostrando em vez de enumerar exaustivamente coalizões além de um certo limiar) valeria a troca de fidelidade ao algoritmo publicado por viabilidade prática em texto real.
+
+\subsection{Validação restrita a sentenças curtas}
+\label{sec:sentencas-curtas}
+
+A avaliação experimental do SyntaxSHAP (\S5.1 de \cite{amara2024syntaxshap}) filtra deliberadamente os datasets usados (Generics KB, ROCStories, Inconsistent Dataset Negation) para remover sentenças com mais de 15 tokens, justificando a decisão pelo próprio custo computacional discutido acima. A robustez do método a variações de comprimento é então testada apenas dentro da faixa remanescente, de 5 a 15 tokens (Apêndice D.2, Fig.\ 10). Isto é, tanto a validação de fidelidade (\S4.1) quanto a de coerência e alinhamento semântico (\S4.2) do SyntaxSHAP nunca foram checadas para sentenças fora dessa janela — qualquer expectativa sobre o comportamento do método em textos mais longos é, necessariamente, uma extrapolação além do que o próprio paper testou, e não uma conclusão validada por ele.
+
+Essa restrição de escopo é particularmente relevante para o PI Arena: os \texttt{context}s explicados no experimento (tipicamente parágrafos no estilo Wikipedia do \texttt{squad\_v2}) são, em geral, ordens de grandeza mais longos que 15 tokens, tanto individualmente quanto — como discutido em \S\ref{sec:contexto-longo} — quando o texto inteiro é considerado.
+
+\subsection{Subtokenização: fragmentação silenciosa da largura de um nível}
+\label{sec:subtokenizacao}
+
+Os autores do SyntaxSHAP reconhecem que o tokenizer do modelo explicado normalmente não coincide com as fronteiras de palavra do parser sintático, e endereçam esse descompasso de forma explícita (Apêndice C de \cite{amara2024syntaxshap}): quando o tokenizer quebra uma palavra em múltiplos subtokens, cada subtoken herda o mesmo nível e o mesmo papel, na árvore de dependência, da palavra original. Ou seja, o suporte à subtokenização já está previsto no desenho do método, não é uma lacuna da implementação.
+
+O problema é que essa solução, adequada no regime testado pelos autores (tokenização BPE do GPT-2 sobre palavras comuns do inglês, majoritariamente 1 subtoken por palavra), deixa de ser inócua fora dele: qualquer palavra que se fragmente em muitos subtokens infla a largura efetiva do nível em que ela se encontra, mesmo que a estrutura sintática real daquele nível não tenha mudado em nada. Como o custo por nível cresce como $2^{n_l}$ (\S\ref{sec:custo-exponencial}), essa fragmentação se propaga exponencialmente para o custo total — e o faz de forma \emph{silenciosa}, isto é, sem que nada na árvore de dependência em si sinalize o problema.
+
+Esse cenário não é hipotético no contexto do PI Arena: o tokenizer usado (da mesma família do PromptGuard) fragmenta fortemente strings fora do vocabulário comum — uma URL, por exemplo, chega a ser dividida em dez subtokens distintos, e trechos em escrita não latina fragmentam ainda mais, chegando a inflar um único nível da árvore de uma dezena para dezenas de posições efetivas. E esse não é um caso de borda raro nos dados: os \texttt{injected\_task}s do dataset usado no experimento frequentemente contêm URLs inseridas propositalmente pelo atacante, o que significa que a fragmentação por subtokenização tende a coincidir, sistematicamente, com o próprio trecho de texto que o experimento tem maior interesse em explicar.
+
+\subsection{Extensão a textos longos e multi-sentença}
+\label{sec:contexto-longo}
+
+Por fim, o próprio artigo original do SyntaxSHAP é explícito quanto a uma limitação de escopo: toda a formulação e avaliação do método consideram uma única sentença de entrada — uma única árvore de dependência — por vez. Os autores especulam, na seção de limitações, que o método "pode ser escalado para texto com múltiplas sentenças ou um parágrafo, quebrando-o em múltiplas árvores de dependência e rodando o SyntaxSHAP em paralelo" \parencite{amara2024syntaxshap}, mas essa extensão nunca é implementada nem avaliada no artigo — é apresentada apenas como direção futura, junto de um alerta que os próprios autores reconhecem, sem resolver: fazer isso descarta qualquer correlação sintática ou semântica \emph{entre} sentenças, já que cada árvore é construída e explicada isoladamente.
+
+Como os \texttt{context}s do PI Arena são, em geral, parágrafos com múltiplas sentenças, este experimento precisou implementar exatamente essa extensão especulativa — orquestrando o SyntaxSHAP sentença a sentença e agregando os resultados ao final — sem que houvesse, na literatura, qualquer evidência prévia de que essa estratégia preserva as propriedades de fidelidade e coerência demonstradas pelo artigo original para sentenças isoladas. Essa decisão de design herda, portanto, tanto a perda de correlações entre sentenças já antecipada pelos autores quanto uma consequência computacional direta discutida em \S\ref{sec:custo-exponencial}: como o custo de explicar o \texttt{context} inteiro é a soma dos custos de cada sentença, o tempo total do processo passa a ser determinado pela sentença \emph{mais cara} dentro do parágrafo — muitas vezes uma única sentença sintaticamente atípica (por exemplo, com uma URL ou um trecho em outro alfabeto, como discutido em \S\ref{sec:subtokenizacao}) — e não por uma média representativa do texto como um todo.
+
+\printbibliography
+
+\end{document}

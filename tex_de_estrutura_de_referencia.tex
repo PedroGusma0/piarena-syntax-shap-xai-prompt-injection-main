@@ -1,0 +1,54 @@
+\subsubsection{Prompt Injection}
+
+A busca realizada para Prompt Injection retornou, novamente, um total de \textbf{20 artigos}. As principais tendências observadas foram:
+
+\paragraph{Crescimento de publicações} Há um crescimento significativo no volume de publicações relacionadas ao tema entre 2024 e 2025 (Figura \ref{fig:pub-por-ano-acl-pi}).
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.8\linewidth]{figs/Publicações por Ano_acl_pi.png}
+    \caption{Publicações por ano de Prompt Injection na ACL.}
+    \label{fig:pub-por-ano-acl-pi}
+\end{figure}
+
+\paragraph{Áreas de Atuação} As áreas aplicação mais recorrentes envolvem: (i) Segurança de LLMs: Foco central em ataques de Prompt Injection (direta e indireta) e técnicas de jailbreak; (ii) Defesa e Mitigação: Desenvolvimento de mecanismos como \textbf{guardrails}, \textbf{detecção de anomalias} e \textbf{reforço de alinhamento }de tarefas; (iii) Agentes Inteligentes: Estudos focados na vulnerabilidade de sistemas multiagentes e agentes integrados a ferramentas externas; (iv) Benchmarking: Criação de conjuntos de dados e métricas para avaliar riscos de segurança e performance em tarefas específicas; (v) Processamento de Linguagem Natural: Aplicações em interfaces de bancos de dados (NLIDB), raciocínio em cadeia (CoT) e tradução de imagem.
+
+A maioria dos artigos analisados não utiliza técnicas de explicabilidade (XAI) tradicionais para fundamentar a nomenclatura ou classificação dos ataques. No entanto, existem pontos relevantes:
+
+\paragraph{Uso de Interpretabilidade Interna:} O artigo de \textcite{hung2025attention} destaca-se por utilizar a análise de padrões de atenção (mecanismos internos do modelo) e o conceito de distraction effect para explicar tecnicamente como o ataque de Prompt Injection desvia o foco do modelo.
+
+\paragraph{Referências Externas:} O artigo \textcite{ding2024wolf} menciona que outros estudos (como JailbreakTracer \parencite{sayeedi2025jailbreaktracer}) utilizam XAI para detecção e análise de padrões, embora ele próprio foque na automação de ataques.
+
+\paragraph{Foco em Benchmarks e Defesa:} A maior parte dos outros trabalhos (como InjecAgent \parencite{zhan2024injecagent} e SecureSQL \parencite{song2024securesql}) foca na criação de datasets de teste e mecanismos de defesa práticos sem recorrer a ferramentas de explicabilidade para justificar as nomenclaturas.
+
+\paragraph{Lacuna de Pesquisa: } Lacunas identificadas incluem a ausência de justificativa técnica, visto que a maioria dos artigos não utiliza técnicas de XAI, como LIME ou SHAP, para fundamentar a nomenclatura ou a classificação dos ataques de Prompt Injection. Eles também tendem a priorização de avaliação de defesas e eficácia do ataque, sem se preocuparem com os mecanismos internos do modelo que levaram à vulnerabilidade. Além disso, mesmo quando presente, a explicabilidade limita-se à capacidade do modelo de ``auto-relatar'' seu raciocínio o que é considerado uma racionalização post-hoc. 
+
+Ademais, quando se tratando dos riscos dos sistemas e agentes, há uma lacuna no desenvolvimento de defesas para modelos que processam imagens e áudio, além de uma alta taxa de vulnerabilidade (40\%) em protocolos de agentes de IA \parencite{yan2024backdooring, xu2024preemptive}. De maneira mais ampla, ainda há desafios na detecção de Injeções Indiretas, modelos de detecção atuais têm dificuldade em identificar injeções indiretas de prompt de forma eficaz em comparação com ataques diretos \parencite{nakash2025breaking}.
+
+\vspace{0.5cm}
+
+Na Tabela \ref{tab:acl-pi} estão presentes os artigos mais relevantes para esta pesquisa. Apenas \textcite{hung2025attention} aborda diretamente o assunto desta revisão.
+
+\begin{table}[ht!]
+    \centering
+    \small
+    \caption{Artigos relevantes para o contexto de Prompt Injection usando XAI}
+    \begin{tabularx}{\linewidth}{p{6cm} X}
+        \toprule
+        \textbf{Artigo} & \textbf{Detalhes} \\
+        \midrule
+        
+        \textcite{hung2025attention} & Ele utiliza a análise de padrões de atenção e o conceito de \textit{distraction effect} para explicar o funcionamento interno e justificar a detecção de ataques de Prompt Injection. Ele identifica unidades de atenção específicas que mudam o foco da instrução original para a injetada. \\
+
+        \textcite{zhang2025defense} & O artigo foca na proposta de um mecanismo de defesa baseado em uma mistura de diferentes codificações de caracteres. \\
+
+        \textcite{wang2025g} & O foco está no uso de redes neurais gráficas para detecção de anomalias e na aplicação de intervenção topológica para a remediação de ataques. \\
+
+        \textcite{chen2025can} & O trabalho foca na viabilidade de detectar e remover ataques de injeção de prompt indireta, avaliando modelos de detecção e métodos de remoção por segmentação e extração. \\
+        
+        \bottomrule
+    \end{tabularx}
+    \label{tab:acl-pi}
+\end{table}
+
+O trabalho encontrado na busca com maior número de citações foi \textcite{yan2024backdooring}, no entanto, ele foca na formalização do conceito de ``\textit{Virtual Prompt Injection}'' (TPI) e na demonstração de sua eficácia por meio do envenenamento de dados.

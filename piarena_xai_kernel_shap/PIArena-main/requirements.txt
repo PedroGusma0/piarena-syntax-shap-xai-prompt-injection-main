@@ -1,0 +1,28 @@
+transformers
+torch
+torchvision
+torchaudio
+openai
+scipy
+numpy
+rich
+datasets
+scikit-learn
+fuzzywuzzy
+rouge
+accelerate
+huggingface-hub
+jieba
+levenshtein
+spacy
+vllm
+fschat[model_worker,webui]
+bitsandbytes
+google-generativeai
+google-genai
+anthropic
+
+# --xai kernelshap (see plans/xai-kernelshap-promptguard.md)
+captum          # captum.attr.KernelShap — computes Shapley values (backend="captum", the default)
+shap            # official shap package — shap.KernelExplainer computes Shapley values (backend="shap"), and shap.plots.text/bar render saliency maps regardless of backend
+matplotlib      # bar/histogram plot rendering (scripts/xai_metrics.py)

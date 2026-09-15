@@ -1,0 +1,40 @@
+pelo semantic scholar foram encontrados 14 citações
+
+certo, poucos artigos atualizam o syntaxshap, mas pode ser uma boa ideia dá uma geral do conteúdo desses artigos que usam essa ferramenta
+
+mencionando o SyntaxShap como ferramenta de XAI, mas sem utiliza-lo (foi preferível usar métodos de SHAP e LIME)
+
+syntaxshap é um método que não considera versões entre modelos
+
+os próprios autores criarem uma versão melhorada do SyntaxShap, o ConceptX 
+
+"são otimizados para a log-probabilidade de saídas de LLM, tornando-os inadequados para geração de resposta completa (full-response generation), sendo escaláveis apenas para tarefas de geração de token único (ex.: classificação)" - O syntax shap é otimizado para classificação e não se dá bem com geração de resposta completa
+
+Ou seja, o syntax shap é otimizado para classificação, mas não é bom em geração de resposta completa
+
+SyntaxSHap é um método de perturbação que respeita coerência gramatical. Mas a linha de XAI aparenta usá-lo para citar métodos “passados” e foca em criar novos métodos de XAI, O synstaxshap é quase como se fosse a base de pertubação com coerência gramatical e tem novos artigos que exploram isso.
+
+Como usam o SyntaxShap?
+O que falam sobre o método?
+Como o artigo se relaciona com esse método?
+
+Towards Faster Language Model Inference Using
+Mixture-of-Experts Flow Matching
+
+O artigo "Towards Faster Language Model Inference Using Mixture-of-Experts Flow Matching" (Aihua Li, Duke University, arXiv:2604.15009) cita o SyntaxShap. Como usam o SyntaxShap: não usam — não há implementação, comparação experimental ou aplicação do método em nenhuma parte do artigo. O que falam sobre o método: nada — não existe nenhuma descrição, crítica ou explicação do SyntaxShap no corpo do texto ou nos apêndices; a única aparição é a referência bibliográfica completa na lista final. Como o artigo se relaciona com esse método: a relação é apenas temática e indireta (ambos pertencem à área de PLN/modelos de linguagem), sem vínculo metodológico ou conceitual explícito — a citação aparece "solta" na bibliografia, sem ser de fato discutida no corpo do artigo.
+
+"Comparing Explanations is Not Enough, Explain the Change: New Standards are Needed to Explain Behavioral Shifts in Large Language Models"
+
+ (Ciaperoni, Di Vece et al., arXiv:2602.02304v3) cita o SyntaxShap. Como usam o SyntaxShap: não usam diretamente — o SyntaxShap não é aplicado, implementado ou testado em nenhum dos experimentos do artigo (que usam Integrated Gradients, CKA, activation patching, SAEs e outros métodos). O que falam sobre o método: citam-no apenas de passagem, como exemplo de método XAI de atribuição de features tradicional/single-checkpoint, ao afirmar que a "comparabilidade" (D1, um dos desiderata propostos) se alinha ao princípio de fidelidade em XAI que garante que explicações acompanhem a evolução comportamental do modelo — citando SyntaxShap junto com Ribeiro et al. (LIME) como referência a esse princípio de fidelidade, sem detalhar sua metodologia sintática específica. Como o artigo se relaciona com esse método: a relação é conceitual e crítica implícita — o artigo argumenta que métodos como o SyntaxShap (explicadores de "single-checkpoint", isto é, que explicam um único modelo isoladamente) são estruturalmente insuficientes para explicar mudanças comportamentais entre versões de um modelo, pois respondem "por que este modelo produz esta saída?" mas não "o que mudou entre duas versões?"; o SyntaxShap é citado como um representante desse paradigma tradicional de XAI que a proposta do artigo (XAI∆, ou "Comparative XAI") busca superar.
+
+
+Explainability-Based Token Replacement on LLM-Generated Text" (Mohammadi, Giachanou, Oberski, Bagheri, arXiv:2506.04050v2)
+
+cita o SyntaxShap. Como usam o SyntaxShap: não usam — o artigo emprega SHAP e LIME padrão em seus experimentos de detecção de texto gerado por IA, mencionando o SyntaxShap apenas na seção de Related Work, sem implementá-lo ou testá-lo. O que falam sobre o método: descrevem-no brevemente como uma extensão do SHAP que incorpora estrutura sintática, atribuindo scores de importância a constituintes em nível de frase (phrase-level constituents) em vez de tokens individuais, o que pode fornecer explicações linguisticamente mais significativas para tarefas de geração de texto. Como o artigo se relaciona com esse método: a relação é de contextualização/justificativa de escolha metodológica — os autores citam o SyntaxShap (junto com Integrated Gradients) como uma abordagem alternativa de explicabilidade existente na literatura, mas explicam que optaram por SHAP e LIME em vez dele porque são "model-agnostic" e amplamente aplicáveis a qualquer arquitetura de classificador (incluindo o ensemble de transformers e XGBoost que usam), o que dá mais flexibilidade ao framework de substituição de tokens proposto no artigo.
+
+
+"Concept-Level Explainability for Auditing & Steering LLM Responses" (Kenza Amara, Rita Sevastjanova, Mennatallah El-Assady 
+— os mesmos autores do SyntaxShap, ETH Zurich, arXiv:2505.07610) cita o SyntaxShap. Como usam o SyntaxShap: não usam diretamente nos experimentos — a proposta é excluí-lo explicitamente da comparação empírica; os autores afirmam que não incluem métodos como HEDGE, Feature Attribution, SVSampling ou SyntaxSHAP porque "são otimizados para a log-probabilidade de saídas de LLM, tornando-os inadequados para geração de resposta completa (full-response generation), sendo escaláveis apenas para tarefas de geração de token único (ex.: classificação)". O que falam sobre o método: descrevem-no como um método Shapley-based que "opera no nível do token" e incorpora restrições sintáticas e dependências de palavras, citando-o ao lado do TokenSHAP como representante de abordagens de atribuição de tokens tradicionais adaptadas para modelos autorregressivos. Como o artigo se relaciona com esse método: a relação é de posicionamento e superação — o ConceptX (o método proposto no artigo) é apresentado como avanço em relação ao SyntaxShap e ao TokenSHAP, pois opera no nível de conceitos (palavras semanticamente ricas) em vez do nível de token, e usa uma função de similaridade semântica ao invés de reprodução literal do próximo token, permitindo lidar com gerações de texto completas (não apenas single-token) — justamente a limitação técnica pela qual o SyntaxShap foi excluído das comparações experimentais. NAO ESTA NO ACL ANTOLOGY
+
+Explainable Mapper: Charting LLM Embedding Spaces Using Perturbation-Based Explanation and Verification Agents" (Xinyuan Yan, Rita Sevastjanova, Sinie van der Ben, Mennatallah El-Assady, Bei Wang 
+— nota-se que Sevastjanova e El-Assady são coautores originais do SyntaxShap, arXiv:2507.18607) cita o SyntaxShap. Como usam o SyntaxShap: não usam diretamente — o artigo propõe um framework diferente (mapper graphs + agentes LLM de explicação/verificação para explorar espaços de embeddings), sem implementar ou aplicar o SyntaxShap em seus experimentos. O que falam sobre o método: citam-no brevemente na seção de trabalhos relacionados (Text Perturbation and Summarization), descrevendo-o como um exemplo de método que, "em vez de perturbações aleatórias, perturba o texto removendo palavras enquanto preserva a coerência gramatical" ("Instead of random perturbations, SyntaxShap perturbs text by removing words while preserving grammatical coherence"). Como o artigo se relaciona com esse método: a relação é de contextualização dentro de uma revisão mais ampla sobre métodos de perturbação de texto usados para avaliar robustez e interpretabilidade — o SyntaxShap é citado como um precedente relevante de perturbação estruturada (respeitando gramática) em contraste com perturbações aleatórias, servindo de base conceitual para a operação de "perturbação" (perturbation) que os próprios autores empregam em seus Verification Agents (que também usam substituições de 1 token preservando coerência gramatical/sentido para verificar a robustez das explicações geradas).

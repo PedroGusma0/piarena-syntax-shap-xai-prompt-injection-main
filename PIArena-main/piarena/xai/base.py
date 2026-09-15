@@ -1,0 +1,33 @@
+from abc import ABC, abstractmethod
+
+from ..registry import XAI_REGISTRY
+
+# Expose decorator at module level for convenience (same pattern as
+# piarena/attacks/base.py:register_attack and piarena/defenses/base.py:register_defense)
+register_xai = XAI_REGISTRY.register
+
+
+class BaseXAI(ABC):
+    """Base class for all explainability (XAI) methods in PIArena.
+
+    Third plugin type alongside BaseAttack/BaseDefense, added specifically
+    to support explaining defense decisions (starting with `promptguard`) —
+    see plans/xai-syntaxshap-promptguard.md for the design rationale.
+    """
+
+    name: str
+    DEFAULT_CONFIG = {}
+
+    def __init__(self, config: dict = None):
+        self.config = {**self.DEFAULT_CONFIG, **(config or {})}
+
+    @abstractmethod
+    def explain(self, target_inst: str, context: str, injected_task: str, **kwargs) -> dict:
+        """Explain a defense's decision on this sample. Return a dict keyed
+        by the span(s) explained (e.g. "context", "injected_task"), each
+        value itself a dict of XAI-method-specific fields (tokens, per-token
+        importance values, etc.)."""
+        ...
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(name={self.name!r})"
