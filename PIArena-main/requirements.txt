@@ -1,16 +1,24 @@
 transformers
-# torch/torchvision/torchaudio: install separately, pinned to the pod's CUDA
-# version (see PIArena-main/CLAUDE.md's setup section, which already
-# documented this as the intended state — these were left uncommented here
-# by mistake). Leaving them unpinned in this file lets pip grab whatever
-# latest torch is current, which then has to match whatever vllm resolves to
-# below — on a RunPod runpod/pytorch:*-cu1281-torch280-* pod this caused pip
-# to backtrack through 100+ vllm releases looking for a combination that
-# works, eventually trying to build vllm==0.1.3 from source, which fails
-# because its build step calls torch.cuda.get_device_capability() inside
-# pip's isolated build sandbox, where CUDA isn't reachable the way that old
-# build script expects. For that image, install matching versions first:
-#   pip install torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+# torch: NÃO listado aqui de propósito, e vllm (abaixo) NÃO deixado sem pin.
+# O wheel do vllm vem com PyTorch embutido/compilado contra uma versão exata
+# ("The vLLM wheel bundles PyTorch and all required dependencies" — docs
+# oficiais) e declara essa versão exata como dependência própria
+# (torch==2.13.0/torchvision==0.28.0/torchaudio==2.11.0 pro vllm==0.29.0,
+# conferido direto na metadata do PyPI). Se torch também fosse listado aqui
+# com outro número, ou deixado sem pin nenhum ("latest"), pip teria que
+# reconciliar dois requisitos conflitantes de torch na mesma resolução — foi
+# exatamente isso que causou o pip backtrackear por 100+ releases de vllm
+# num pod RunPod antigo, até tentar buildar vllm==0.1.3 do zero (que falha,
+# CUDA inacessível dentro do sandbox de build isolado do pip). Deixar o vllm
+# pinado e não listar torch evita esse conflito -- o pip resolve numa
+# passada só, usando o que o vllm já exige.
+#
+# --extra-index-url abaixo é só pra pip buscar a variante CUDA certa desse
+# torch exato -- troque cu129 pelo CUDA do seu pod/cluster antes de instalar
+# (`nvidia-smi`, "CUDA Version: X.Y" no canto superior direito ->
+# cu121/cu124/cu126/cu128/cu129/etc.).
+--extra-index-url https://download.pytorch.org/whl/cu129
+vllm==0.29.0
 openai
 scipy
 numpy
@@ -24,14 +32,14 @@ huggingface-hub
 jieba
 levenshtein
 spacy
-# vllm: not needed for the `--defense promptguard --xai syntaxshap` pilot
-# (backend LLM — Qwen3-4B-Instruct-2507 by default — loads via HuggingFace
-# `transformers.AutoModelForCausalLM`, not vllm; see piarena/llm.py). Left
-# unpinned it's also the direct cause of the pip backtracking described
-# above. Only install it if you actually need main_search.py's
-# strategy_search vllm fast-path, and pin a version compatible with your
-# pod's CUDA/torch first, e.g.:
-#   pip install vllm==0.11.1
+# vllm (pinado acima, junto do torch) não é usado de fato pelo pipeline
+# `--defense promptguard --xai syntaxshap|kernelshap` (o backend LLM —
+# Qwen3-4B-Instruct-2507 por padrão — carrega via `transformers.
+# AutoModelForCausalLM`, não vllm; ver piarena/llm.py) -- mas
+# piarena/defenses/__init__.py importa `datafilter` de forma eager (mesmo
+# sem usar `--defense datafilter`), que faz `from vllm import ...` no topo
+# do arquivo. Sem vllm instalado, o import de piarena.defenses (que main.py
+# sempre faz) quebra antes de chegar no seu código.
 fschat[model_worker,webui]
 bitsandbytes
 google-generativeai
