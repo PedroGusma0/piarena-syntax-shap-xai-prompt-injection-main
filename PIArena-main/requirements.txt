@@ -1,24 +1,7 @@
 transformers
-# torch: NÃO listado aqui de propósito, e vllm (abaixo) NÃO deixado sem pin.
-# O wheel do vllm vem com PyTorch embutido/compilado contra uma versão exata
-# ("The vLLM wheel bundles PyTorch and all required dependencies" — docs
-# oficiais) e declara essa versão exata como dependência própria
-# (torch==2.13.0/torchvision==0.28.0/torchaudio==2.11.0 pro vllm==0.29.0,
-# conferido direto na metadata do PyPI). Se torch também fosse listado aqui
-# com outro número, ou deixado sem pin nenhum ("latest"), pip teria que
-# reconciliar dois requisitos conflitantes de torch na mesma resolução — foi
-# exatamente isso que causou o pip backtrackear por 100+ releases de vllm
-# num pod RunPod antigo, até tentar buildar vllm==0.1.3 do zero (que falha,
-# CUDA inacessível dentro do sandbox de build isolado do pip). Deixar o vllm
-# pinado e não listar torch evita esse conflito -- o pip resolve numa
-# passada só, usando o que o vllm já exige.
-#
-# --extra-index-url abaixo é só pra pip buscar a variante CUDA certa desse
-# torch exato -- troque cu129 pelo CUDA do seu pod/cluster antes de instalar
-# (`nvidia-smi`, "CUDA Version: X.Y" no canto superior direito ->
-# cu121/cu124/cu126/cu128/cu129/etc.).
---extra-index-url https://download.pytorch.org/whl/cu129
-vllm==0.29.0
+torch
+torchvision
+torchaudio
 openai
 scipy
 numpy
@@ -32,32 +15,15 @@ huggingface-hub
 jieba
 levenshtein
 spacy
-# vllm (pinado acima, junto do torch) não é usado de fato pelo pipeline
-# `--defense promptguard --xai syntaxshap|kernelshap` (o backend LLM —
-# Qwen3-4B-Instruct-2507 por padrão — carrega via `transformers.
-# AutoModelForCausalLM`, não vllm; ver piarena/llm.py) -- mas
-# piarena/defenses/__init__.py importa `datafilter` de forma eager (mesmo
-# sem usar `--defense datafilter`), que faz `from vllm import ...` no topo
-# do arquivo. Sem vllm instalado, o import de piarena.defenses (que main.py
-# sempre faz) quebra antes de chegar no seu código.
+vllm
 fschat[model_worker,webui]
 bitsandbytes
 google-generativeai
 google-genai
 anthropic
-
-# --xai syntaxshap (see plans/xai-syntaxshap-promptguard.md)
-pandas          # get_token_dependency_tree (syntax-aware coalition tree)
-cloudpickle     # required by the vendored thirdparty/_serializable.py
-shap            # official shap package — plots.text/plots.bar for both --xai methods, and the "shap" backend of kernelshap's shap.KernelExplainer
-matplotlib      # shap.plots.bar rendering
-# spacy is already listed above; also run once: python -m spacy download en_core_web_sm
-
-# --xai kernelshap (see plans/xai-kernelshap-promptguard.md)
-captum          # captum.attr.KernelShap — computes Shapley values (backend="captum", the default; shap/matplotlib already listed above)
-
-# W&B logging (main.py, scripts/xai_metrics.py, scripts/xai_compare_fidelity.py
-# — opt-out via --no-wandb). WANDB_MODE=offline by default (see
-# wandb_sync_loop.sh for how the offline data reaches wandb.ai without this
-# process itself needing to stay online).
+pandas
+cloudpickle
+shap
+matplotlib
+captum
 wandb
