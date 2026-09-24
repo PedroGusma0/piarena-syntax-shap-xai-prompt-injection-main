@@ -9,12 +9,22 @@ actually explained, and `asr`/`utility`, the benchmark's own evaluators),
 reloads the classifier + explainer to re-score masked variants for
 Fidelity(t)/acc@1, and writes:
 
-  - <out-dir>/<result-stem>_metrics.json     — machine-readable, per-sample + aggregate
-  - <out-dir>/<result-stem>_report.md        — human-readable summary table, ending with
-                                                an ASR/Utility summary over the whole run
-  - <out-dir>/plots/saliency_maps.html       — shap.plots.text() per sample
-  - <out-dir>/plots/fidelity_acc_bars.png    — mean Fidelity(t)/acc@1(t) per threshold
-  - <out-dir>/plots/alignment_histogram.png  — distribution of injected_span_percentile
+  - <out-dir>/<result-stem>_metrics.json                — machine-readable, per-sample + aggregate
+  - <out-dir>/<result-stem>_report.md                   — human-readable summary table, ending with
+                                                           an ASR/Utility summary over the whole run
+  - <out-dir>/plots/<result-stem>/saliency_maps.html       — shap.plots.text() per sample, every
+                                                              blocked/explained sample by default (see
+                                                              --max-plot-samples), each header labeled
+                                                              with the attack, and the injected_task's
+                                                              token span outlined on top of shap's own
+                                                              value coloring (see _mark_injected_span)
+  - <out-dir>/plots/<result-stem>/fidelity_acc_bars.png    — mean Fidelity(t)/acc@1(t) per threshold
+  - <out-dir>/plots/<result-stem>/alignment_histogram.png  — distribution of injected_span_percentile
+
+(plots live under a <result-stem> subdirectory, not directly in <out-dir>/plots/,
+so that running this script once per attack against the same --name/out-dir --
+as run_kernelshap_squad_v2_4attacks.sh and run_syntaxshap_squad_v2_4attacks.sh
+do -- doesn't have each attack's plots silently overwrite the previous one's.)
 
 Since `main.py` only runs the XAI phase on samples the defense actually
 blocked (`detect_flag=True`), `per_sample`/the plots only ever cover that
@@ -49,6 +59,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import time
 
 import numpy as np
@@ -75,7 +86,9 @@ def parse_args():
                          "enumeration. Ignored for --xai-method kernelshap.")
     p.add_argument("--thresholds", type=float, nargs="+", default=[0.1, 0.2, 0.3, 0.5])
     p.add_argument("--out-dir", default=None, help="Default: <result dir>/xai_metrics/")
-    p.add_argument("--max-plot-samples", type=int, default=25, help="Cap on samples rendered into saliency_maps.html.")
+    p.add_argument("--max-plot-samples", type=int, default=None,
+                    help="Cap on samples rendered into saliency_maps.html. Default: no cap "
+                         "(renders every blocked/explained sample) -- pass e.g. 25 to keep the file small.")
     p.add_argument("--no-wandb", action="store_true",
                     help="Disable W&B logging (on by default). WANDB_MODE=offline unless already set in the environment.")
     return p.parse_args()
@@ -150,7 +163,11 @@ def _load_explainer(xai_method: str, model_name: str, algorithm: str):
 
 
 def compute_one(sample, make_rescorer, thresholds):
-    xai = sample.get("xai_result", {}).get("context")
+    # `sample.get("xai_result", {})` would only fall back to `{}` if the key
+    # were absent -- but main.py sets it to an explicit `None` (not absent)
+    # for every sample the defense didn't block, so `or {}` is needed to
+    # actually catch that case instead of crashing on `None.get(...)`.
+    xai = (sample.get("xai_result") or {}).get("context")
     defense_result = sample.get("defense_result", {})
     context = sample.get("injected_context")
     if xai is None or context is None:
@@ -226,8 +243,16 @@ def main():
     result = load_json(args.result)
     xai_method = args.xai_method if args.xai_method != "auto" else _infer_xai_method(args.result)
 
+    stem = os.path.splitext(os.path.basename(args.result))[0]
     out_dir = args.out_dir or os.path.join(os.path.dirname(args.result), "xai_metrics")
-    plots_dir = os.path.join(out_dir, "plots")
+    # Namespaced by `stem` (which includes the attack name, e.g. "...-direct-...")
+    # -- unlike metrics_path/report_path below, this used to be a bare
+    # "plots" dir shared by every result file in the same out_dir. Running
+    # xai_metrics.py once per attack against the same --name (as
+    # run_kernelshap_squad_v2_4attacks.sh does) made each attack's plots
+    # silently overwrite the previous one's, leaving only the last attack's
+    # saliency maps/charts on disk.
+    plots_dir = os.path.join(out_dir, "plots", stem)
     os.makedirs(plots_dir, exist_ok=True)
 
     explainer, make_rescorer = _load_explainer(xai_method, args.model_name, args.algorithm)
@@ -267,7 +292,6 @@ def main():
         "aggregate": aggregate,
     }
 
-    stem = os.path.splitext(os.path.basename(args.result))[0]
     metrics_path = os.path.join(out_dir, f"{stem}_metrics.json")
     save_json(metrics_out, metrics_path)
     print(f"Wrote {metrics_path}")
@@ -278,7 +302,8 @@ def main():
     print(f"Wrote {report_path}")
 
     try:
-        _render_plots(result, per_sample, plots_dir, xai_method, max_samples=args.max_plot_samples)
+        attack = _guess_attack(args.result)
+        _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples=args.max_plot_samples)
     except ImportError as e:
         print(f"Skipping plots (shap/matplotlib not installed): {e}")
 
@@ -432,15 +457,104 @@ def _render_report(metrics_out) -> str:
     return "\n".join(lines)
 
 
-def _render_plots(result, per_sample, plots_dir, xai_method, max_samples=25):
+_INJECTED_SPAN_COLOR = "#c9860f"
+# shap.plots.text() renders each token as its own
+# <div id='_tp_<uuid>_ind_N' style='...background: rgba(...)'>TOKEN</div> --
+# confirmed by generating a real shap.Explanation's HTML and inspecting it
+# (the <uuid> is per-render/random, N is the token's position in `data`).
+# Matched here to add a border around the injected_task span on top of
+# shap's own value coloring, without touching that coloring or needing to
+# restructure shap's HTML (which would be far more fragile against a shap
+# version bump than tweaking each already-existing token div's style).
+_TOKEN_DIV_RE = re.compile(r"(<div id='_tp_\w+_ind_(\d+)'\s*style=')([^']*)(')")
+
+
+def _mark_injected_span(html: str, injected_span: dict | None) -> str:
+    """Adds a border around the token(s) covering `injected_span` (the
+    injected_task's [start_token, end_token) range) in shap.plots.text()'s
+    HTML. A no-op (returns `html` unchanged) if `injected_span` is missing,
+    or if shap's internal token-div format above ever changes and the regex
+    stops matching -- a saliency map without the border beats no saliency
+    map at all, so this never raises."""
+    if not injected_span:
+        return html
+    start, end = injected_span.get("start_token"), injected_span.get("end_token")
+    if start is None or end is None:
+        return html
+
+    def repl(m):
+        idx = int(m.group(2))
+        if not (start <= idx < end):
+            return m.group(0)
+        extra = f"border-top:2px solid {_INJECTED_SPAN_COLOR};border-bottom:2px solid {_INJECTED_SPAN_COLOR};"
+        if idx == start:
+            extra += f"border-left:2px solid {_INJECTED_SPAN_COLOR};padding-left:2px;"
+        if idx == end - 1:
+            extra += f"border-right:2px solid {_INJECTED_SPAN_COLOR};padding-right:2px;"
+        return m.group(1) + m.group(3) + ";" + extra + m.group(4)
+
+    return _TOKEN_DIV_RE.sub(repl, html)
+
+
+_SAMPLES_PER_CHUNK = 50
+# Rendering every blocked sample's shap.plots.text() straight into the page
+# (default since --max-plot-samples became uncapped) makes the DOM itself
+# huge even once the file is downloaded -- opening it means the browser lays
+# out every sample at once. Chunking into groups of _SAMPLES_PER_CHUNK,
+# hidden past the first chunk until a "load more" click, keeps the initial
+# render cheap without limiting how many samples the file actually contains.
+
+
+def _load_more_button_html(total_n: int, n_chunks: int, chunk_size: int = _SAMPLES_PER_CHUNK) -> str:
+    """Vanilla JS, no library -- this is a plain file opened straight off
+    disk in a browser (not an Artifact), so there's no CDN to load from
+    reliably anyway. Reveals one hidden `.chunk` div per click; hides itself
+    once every chunk is shown."""
+    return f"""
+<div style="margin:20px 0;">
+  <button id="load-more-btn" onclick="__loadMoreSamples()"
+          style="padding:8px 18px;font-size:14px;cursor:pointer;">Carregar mais amostras</button>
+  <span id="load-more-status" style="margin-left:10px;color:#666;"></span>
+</div>
+<script>
+(function() {{
+  var chunks = document.querySelectorAll('.chunk');
+  var shown = 1;
+  var total = {total_n};
+  var chunkSize = {chunk_size};
+  var nChunks = {n_chunks};
+  function updateStatus() {{
+    var visible = Math.min(shown * chunkSize, total);
+    document.getElementById('load-more-status').textContent =
+      '(' + visible + ' de ' + total + ' amostras mostradas)';
+    if (shown >= nChunks) {{
+      document.getElementById('load-more-btn').style.display = 'none';
+    }}
+  }}
+  window.__loadMoreSamples = function() {{
+    if (shown < chunks.length) {{
+      chunks[shown].hidden = false;
+      shown++;
+      updateStatus();
+    }}
+  }};
+  updateStatus();
+}})();
+</script>
+"""
+
+
+def _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples=None):
     import shap  # official shap package — plotting only, not computation
     import matplotlib
     matplotlib.use("Agg")
 
-    html_parts = [f"<html><head><meta charset='utf-8'><title>{xai_method} saliency maps</title></head><body>"]
-    n = 0
+    sample_blocks = []
     for idx, sample in result.items():
-        xai = sample.get("xai_result", {}).get("context")
+        # same `None`-vs-absent pitfall as compute_one() above -- xai_result
+        # is explicit `None` (not absent) for every sample the defense didn't
+        # block, so `or {}` is needed here too.
+        xai = (sample.get("xai_result") or {}).get("context")
         defense_result = sample.get("defense_result", {})
         if xai is None or not xai.get("values"):
             continue
@@ -451,22 +565,33 @@ def _render_plots(result, per_sample, plots_dir, xai_method, max_samples=25):
         )
         p_malign = xai.get("p_malign", xai.get("p_non_benign"))
         header = (
-            f"<h3>Sample {idx} — predicted_label={xai.get('predicted_label')}, "
+            f"<h3>Sample {idx} — attack={attack}, predicted_label={xai.get('predicted_label')}, "
             f"detect_flag={defense_result.get('detect_flag')}, "
             f"P(malign)={p_malign}</h3>"
         )
         try:
             body = shap.plots.text(explanation, display=False)
+            body = _mark_injected_span(body, xai.get("injected_span"))
         except Exception as e:  # pragma: no cover — defensive, don't let one bad sample kill the whole report
             body = f"<p>(failed to render: {e})</p>"
-        html_parts.append(header + body)
-        n += 1
-        if n >= max_samples:
+        sample_blocks.append(header + body)
+        if max_samples is not None and len(sample_blocks) >= max_samples:
             break
+
+    n = len(sample_blocks)
+    chunks = [sample_blocks[i:i + _SAMPLES_PER_CHUNK] for i in range(0, n, _SAMPLES_PER_CHUNK)]
+
+    html_parts = [f"<html><head><meta charset='utf-8'><title>{xai_method} saliency maps ({attack})</title></head><body>"]
+    for i, chunk in enumerate(chunks):
+        hidden_attr = "" if i == 0 else " hidden"
+        html_parts.append(f"<div class='chunk'{hidden_attr}>" + "\n".join(chunk) + "</div>")
+    if len(chunks) > 1:
+        html_parts.append(_load_more_button_html(n, len(chunks)))
     html_parts.append("</body></html>")
     with open(os.path.join(plots_dir, "saliency_maps.html"), "w", encoding="utf-8") as f:
         f.write("\n".join(html_parts))
-    print(f"Wrote {os.path.join(plots_dir, 'saliency_maps.html')} ({n} sample(s))")
+    print(f"Wrote {os.path.join(plots_dir, 'saliency_maps.html')} "
+          f"({n} sample(s), {len(chunks)} chunk(s) of {_SAMPLES_PER_CHUNK})")
 
     _render_fidelity_acc_bars(per_sample, plots_dir)
     _render_alignment_histogram(per_sample, plots_dir)
