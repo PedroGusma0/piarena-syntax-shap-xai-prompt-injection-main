@@ -93,7 +93,7 @@ Then import it in `piarena/xai/__init__.py`:
 from . import my_xai  # noqa: F401
 ```
 
-Run it via `main.py --xai my_xai` (opt-in — omit `--xai` and nothing changes). Config, if any, goes through the `xai_config` YAML key (same pattern as `attack_config`/`defense_config` — no dedicated CLI flag).
+Run it via `main.py --xai my_xai` (opt-in — omit `--xai` and nothing changes). Config, if any, goes through the `xai_config` YAML key (same pattern as `attack_config`/`defense_config` — no dedicated CLI flag), with one exception: `kernelshap`'s `backend` key also has a `--xai_backend captum|shap` CLI shortcut (see `docs/xai/kernelshap.md`) — a plugin-specific convenience, not a general pattern for every `xai_config` key.
 
 ## The Main Interfaces
 

@@ -25,7 +25,7 @@ python main.py --dataset squad_v2 --attack direct --defense promptguard --xai ke
 
 Works the same way for the other heuristic attacks (`ignore`/`completion`/`combined`/`character`) — the injected-span localization accounts for each one's fixed prefix automatically.
 
-Or via a YAML config's `xai`/`xai_config` keys (same pattern as `attack_config`/`defense_config` — no dedicated CLI flag for the config dict):
+Or via a YAML config's `xai`/`xai_config` keys (same pattern as `attack_config`/`defense_config` — no dedicated CLI flag for the config dict, **except `backend`**, see below):
 
 ```yaml
 xai: kernelshap
@@ -39,6 +39,28 @@ xai_config:
 ## Backends
 
 `backend` (default `"captum"`) picks which library actually solves the Kernel SHAP regression — `"captum"` (`captum.attr.KernelShap`) or `"shap"` (official `shap.KernelExplainer`, `link="identity"`, a single all-masked background row — the same fixed-baseline semantics as the captum path, so the two are directly comparable). Everything else (tokenization, word-level feature grouping, masking, the output contract below) is identical between the two — switching is a one-line config change, never a code edit. `xai_result["context"]["backend"]` records which one produced a given result.
+
+`--xai_backend captum|shap` is a dedicated CLI shortcut for this one config key (`main.py`'s only per-key CLI override of an `xai_config` value) — it lets you switch backends without writing a YAML `--config` file, and always wins over a `backend` set inside one:
+
+```bash
+python main.py --dataset squad_v2 --attack direct --defense promptguard --xai kernelshap --xai_backend captum --name kernelshap_captum_pilot --seed 42
+python main.py --dataset squad_v2 --attack direct --defense promptguard --xai kernelshap --xai_backend shap   --name kernelshap_shap_pilot   --seed 42
+```
+
+**Note the two runs above use different `--name` values.** The result filename (`{dataset}-{llm}-{attack}-{defense}-{xai}-{seed}.json`) does not encode `backend` — running both backends under the same `--name`/dataset/attack/model/seed makes the second run either no-op (if the first already finished — `main.py` sees a complete file and skips) or, worse, fill in only the missing indices, leaving a single file with a *mix* of `captum`- and `shap`-produced rows. Always give each backend's run its own `--name` (or otherwise vary the output path) if you intend to compare them afterward.
+
+### Comparing backends
+
+`scripts/xai_compare_backends.py` reads two such raw `main.py` result files (one per backend, same dataset/attack/seed) and reports how much their per-word Shapley values agree — Pearson/Spearman correlation, sign agreement, top-k word overlap, and the `injected_span_percentile` gap between backends, per sample and aggregated:
+
+```bash
+python scripts/xai_compare_backends.py \
+  --captum-result results/evaluation_results/kernelshap_captum_pilot/squad_v2-...-kernelshap-42.json \
+  --shap-result   results/evaluation_results/kernelshap_shap_pilot/squad_v2-...-kernelshap-42.json \
+  --out-dir results_comparison/direct_backend_agreement
+```
+
+Writes `backend_agreement_metrics.json`, `backend_agreement_report.md`, and a `backend_agreement.png` histogram of per-sample Spearman rho under `--out-dir`. See `plans/xai-kernelshap-backend-agreement.md` for the full rationale (why this is a useful cross-check given Kernel SHAP is a sampling-based approximation, and the known `1e6` endpoint-weight difference noted below).
 
 ## What It Does
 
@@ -93,6 +115,6 @@ Plots written to `<out-dir>/plots/`:
 - `fidelity_acc_bars.png` — mean Fidelity(t)/acc@1(t) per threshold, across every explained (blocked) sample.
 - `alignment_histogram.png` — distribution of `injected_span_percentile` across the same samples.
 
-The Markdown report ends with an ASR/Utility summary computed over the *entire* raw result (every dataset sample, not just the ones XAI explained) — the benchmark-level numbers the per-sample XAI metrics sit inside, split into overall / blocked / not-blocked.
+The Markdown report ends with an ASR/Utility summary computed over the *entire* raw result (every dataset sample, not just the ones XAI explained) — the benchmark-level numbers the per-sample XAI metrics sit inside, split into overall / blocked / not-blocked — followed by a per-`category` breakdown (Fidelity/acc@1 at the largest requested threshold, plus ASR/Utility over the whole category) when the dataset provides a `category` field (e.g. `squad_v2`'s phishing/access-denial/content-promotion/infrastructure-failure labels); omitted entirely for datasets without one. Each `saliency_maps.html` sample header also names the category alongside the attack.
 
 See `plans/xai-kernelshap-promptguard.md` for what each metric means and why it's defined that way.

@@ -11,13 +11,17 @@ Fidelity(t)/acc@1, and writes:
 
   - <out-dir>/<result-stem>_metrics.json                — machine-readable, per-sample + aggregate
   - <out-dir>/<result-stem>_report.md                   — human-readable summary table, ending with
-                                                           an ASR/Utility summary over the whole run
+                                                           an ASR/Utility summary over the whole run,
+                                                           plus a per-`category` Fidelity/acc@1/ASR/
+                                                           Utility breakdown when the dataset provides
+                                                           that field (see _category_summary)
   - <out-dir>/plots/<result-stem>/saliency_maps.html       — shap.plots.text() per sample, every
                                                               blocked/explained sample by default (see
                                                               --max-plot-samples), each header labeled
-                                                              with the attack, and the injected_task's
-                                                              token span outlined on top of shap's own
-                                                              value coloring (see _mark_injected_span)
+                                                              with the attack and category, and the
+                                                              injected_task's token span outlined on top
+                                                              of shap's own value coloring (see
+                                                              _mark_injected_span)
   - <out-dir>/plots/<result-stem>/fidelity_acc_bars.png    — mean Fidelity(t)/acc@1(t) per threshold
   - <out-dir>/plots/<result-stem>/alignment_histogram.png  — distribution of injected_span_percentile
 
@@ -190,6 +194,7 @@ def compute_one(sample, make_rescorer, thresholds):
         # simpler (and W&B-safe) than branching on xai_method here.
         "backend": xai.get("backend"),
         "detect_flag": defense_result.get("detect_flag"),
+        "category": sample.get("category"),
         "fidelity": fidelity(full_value, values, rescore_p, thresholds),
         "acc_at_1": acc_at_1(full_value, values, rescore_p, thresholds),
         # False/absent for every sample computed before the per-sample
@@ -238,6 +243,43 @@ def _asr_utility_summary(result: dict) -> dict:
     }
 
 
+def _category_summary(result: dict, per_sample: dict, thresholds) -> dict:
+    """Per-`category` breakdown (the dataset's malicious-content-type label,
+    e.g. "phishing", present on samples that have one — datasets without a
+    `category` field yield an empty summary here, so this section is skipped
+    in the report). Mirrors `_aggregate()`'s Fidelity/acc@1 averaging and
+    `_asr_utility_summary()`'s ASR/Utility averaging, grouped by category
+    instead of by blocked/not-blocked; ASR/Utility are computed over every
+    sample of that category (blocked or not), same "geral" semantics as
+    `_asr_utility_summary()`'s own overall row."""
+    categories = sorted({s.get("category") for s in result.values() if s.get("category")})
+    if not categories:
+        return {}
+
+    def mean_by_t(entries, key):
+        out = {}
+        for t in thresholds:
+            vals = [e[key][str(t)] for e in entries if key in e and e[key].get(str(t)) is not None]
+            out[str(t)] = float(np.mean(vals)) if vals else None
+        return out
+
+    summary = {}
+    for cat in categories:
+        cat_samples = [s for s in result.values() if s.get("category") == cat]
+        cat_entries = [e for e in per_sample.values() if e.get("category") == cat]
+        asr_vals = [_to_float(s.get("asr")) for s in cat_samples if s.get("asr") is not None]
+        utility_vals = [_to_float(s.get("utility")) for s in cat_samples if s.get("utility") is not None]
+        summary[cat] = {
+            "n_total": len(cat_samples),
+            "n_blocked": len(cat_entries),
+            "fidelity_mean": mean_by_t(cat_entries, "fidelity"),
+            "acc_at_1_rate": mean_by_t(cat_entries, "acc_at_1"),
+            "asr_rate": float(np.mean(asr_vals)) if asr_vals else None,
+            "utility_mean": float(np.mean(utility_vals)) if utility_vals else None,
+        }
+    return summary
+
+
 def main():
     args = parse_args()
     result = load_json(args.result)
@@ -275,6 +317,7 @@ def main():
         "n_samples": n_done,
     }
     aggregate["asr_utility"] = _asr_utility_summary(result)
+    aggregate["category_summary"] = _category_summary(result, per_sample, args.thresholds)
 
     metrics_out = {
         "meta": {
@@ -454,6 +497,33 @@ def _render_report(metrics_out) -> str:
         f"| não bloqueadas | {au['not_blocked']['n']} | {au['not_blocked']['asr_rate']} | {au['not_blocked']['utility_mean']} |",
         "",
     ]
+
+    cat_summary = agg.get("category_summary") or {}
+    if cat_summary:
+        # Representative threshold for this compact table: the largest one
+        # requested (default 0.5, "keep half the tokens"). The full
+        # per-threshold numbers are still in category_summary in the JSON
+        # output for anyone who wants them.
+        rep_t = str(max(meta["thresholds"]))
+        lines += [
+            "## Métricas por categoria",
+            "",
+            f"Quebra por `category` (tipo de conteúdo malicioso injetado). Fidelity/acc@1 no limiar "
+            f"t={rep_t}; ASR/Utility calculados sobre todas as amostras da categoria (bloqueadas ou não), "
+            f"mesma semântica da linha \"geral\" do resumo ASR/Utility acima.",
+            "",
+            "| categoria | n (bloqueadas/total) | Fidelity(t) | acc@1(t) | ASR | Utility |",
+            "|---|---|---|---|---|---|",
+        ]
+        for cat, row in cat_summary.items():
+            fid = row["fidelity_mean"].get(rep_t)
+            acc = row["acc_at_1_rate"].get(rep_t)
+            lines.append(
+                f"| {cat} | {row['n_blocked']}/{row['n_total']} | {fid} | {acc} | "
+                f"{row['asr_rate']} | {row['utility_mean']} |"
+            )
+        lines.append("")
+
     return "\n".join(lines)
 
 
@@ -565,7 +635,8 @@ def _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples
         )
         p_malign = xai.get("p_malign", xai.get("p_non_benign"))
         header = (
-            f"<h3>Sample {idx} — attack={attack}, predicted_label={xai.get('predicted_label')}, "
+            f"<h3>Sample {idx} — attack={attack}, category={sample.get('category')}, "
+            f"predicted_label={xai.get('predicted_label')}, "
             f"detect_flag={defense_result.get('detect_flag')}, "
             f"P(malign)={p_malign}</h3>"
         )

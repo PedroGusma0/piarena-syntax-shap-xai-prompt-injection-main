@@ -60,6 +60,11 @@ def parse_args():
     parser.add_argument('--limit', type=int, default=None,
                         help="Limit the number of dataset samples processed (for quick pilots/smoke tests). "
                              "Omit to process the full dataset (default, unchanged behavior).")
+    parser.add_argument('--xai_backend', type=str, default=None, choices=['captum', 'shap'],
+                        help="Override the kernelshap XAI plugin's `backend` config key (captum|shap) "
+                             "without needing a YAML --config. Ignored by any --xai method other than "
+                             "kernelshap (silently accepted into xai_config, per BaseXAI's unchecked "
+                             "config merge — see piarena/xai/base.py).")
 
     args = parser.parse_args()
 
@@ -87,6 +92,8 @@ def parse_args():
     args.defense_config = file_config.get("defense_config", None)
     args.xai = args.xai or file_config.get("xai", None)
     args.xai_config = file_config.get("xai_config", None)
+    if args.xai_backend is not None:
+        args.xai_config = {**(args.xai_config or {}), "backend": args.xai_backend}
 
     print(args)
     return args

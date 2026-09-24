@@ -79,4 +79,4 @@ Plots written to `<out-dir>/plots/`:
 - `fidelity_acc_bars.png` — mean Fidelity(t)/acc@1(t) per threshold, across every explained (blocked) sample.
 - `alignment_histogram.png` — distribution of `injected_span_percentile` across the same samples.
 
-The Markdown report ends with an ASR/Utility summary computed over the *entire* raw result (every dataset sample, not just the ones XAI explained) — the benchmark-level numbers the per-sample XAI metrics sit inside, split into overall / blocked / not-blocked.
+The Markdown report ends with an ASR/Utility summary computed over the *entire* raw result (every dataset sample, not just the ones XAI explained) — the benchmark-level numbers the per-sample XAI metrics sit inside, split into overall / blocked / not-blocked — followed by a per-`category` breakdown (Fidelity/acc@1 at the largest requested threshold, plus ASR/Utility over the whole category) when the dataset provides a `category` field (e.g. `squad_v2`'s phishing/access-denial/content-promotion/infrastructure-failure labels); omitted entirely for datasets without one. Each `saliency_maps.html` sample header also names the category alongside the attack.
