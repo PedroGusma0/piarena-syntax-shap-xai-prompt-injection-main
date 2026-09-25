@@ -59,7 +59,17 @@ O paper original do Kernel SHAP (Eq. 11) pensa o baseline como uma distribuiçã
 
 ## 7. Mudança 6 — truncamento guardado contra o sentinela absurdo de `model_max_length`
 
-Muitos tokenizers HF que nunca tiveram um `max_length` explícito configurado retornam um sentinela do tipo `1_000_000_000_000_000_019_884_624_838_656` em `model_max_length` em vez de um valor usável — um footgun conhecido do HF, não específico deste código. O construtor (linhas 145-148) guarda contra isso: se `max_length` não for passado e `model_max_length` estourar `_SENTINEL_MAX_LENGTH_THRESHOLD` (100.000), cai para `_FALLBACK_MAX_LENGTH = 512` em vez de tentar truncar para um número absurdo (que na prática significa "nunca truncar").
+Muitos tokenizers HF que nunca tiveram um `max_length` explícito configurado retornam um sentinela do tipo `1_000_000_000_000_000_019_884_624_838_656` em `model_max_length` em vez de um valor usável — um footgun conhecido do HF, não específico deste código. O construtor guardava contra isso: se `max_length` não fosse passado e `model_max_length` estourasse `_SENTINEL_MAX_LENGTH_THRESHOLD` (100.000), caía para `_FALLBACK_MAX_LENGTH = 512` em vez de tentar truncar para um número absurdo.
+
+### 7.1 Correção — o fallback do guard virou um truncamento silencioso por padrão, divergindo do que a defesa realmente via
+
+O guard contra o sentinela em si estava certo em existir — o problema era o que ele fazia quando `max_length` **não era passado**. `max_length or getattr(tokenizer, "model_max_length", None)` também caía no ramo do sentinela sempre que `max_length` era `None` (o valor de `DEFAULT_CONFIG`, ou seja, o caso comum de "ninguém pediu truncamento nenhum"), e nesse caso `model_max_length` de um tokenizer real (não o sentinela absurdo) — ~512 tokens para o tokenizer do `Prompt-Guard-86M` — virava o comprimento truncado usado em **toda** chamada, por padrão, silenciosamente.
+
+Isso divergia do que `PromptGuardDefense.execute` (`defense_promptguard.py`) de fato faz: a chamada ao `pipeline()` da defesa não passa nenhum `truncation`/`max_length` — ela pontua o `context` inteiro, sem truncar. Para contextos longos onde o ataque insere a `injected_task` depois desse corte de ~512 tokens (comum em `dolly_closed_qa`/contextos estilo Wikipedia), a defesa via a injeção no texto completo e bloqueava corretamente (`detect_flag=True`), mas o Kernel SHAP explicava só o prefixo truncado — que nunca continha a injeção. Resultado: `predicted_label`/`p_malign` enganosos e `injected_span: null` para uma amostra que, na verdade, tinha sido corretamente bloqueada por causa de uma injeção que a explicação nunca chegava a mostrar.
+
+Confirmado contra dados reais salvos, não só por leitura de código: em `kernelshap_dolly_closed_qa_captum/dolly_closed_qa-...-ignore-promptguard-kernelshap-42.json`, a amostra de chave `"1"` — contexto de 9047 caracteres, injeção no offset de caractere 5353 — tem a lista de palavras do próprio módulo de XAI parando na word 333 ("...large language models but"), centenas de palavras antes da injeção; `predicted_label` sai `"BENIGN"`, `p_malign=0.336`, `injected_span=null`. A amostra `"190"` do arquivo do ataque `direct` mostra o mesmo padrão.
+
+Correção: `max_length=None` (o padrão) agora significa **sem truncamento nenhum** — `_tokenize_content` tokeniza o texto inteiro, batendo exatamente com o que `PromptGuardDefense.execute` pontua. Um `max_length` explícito continua disponível como opt-in para quem quiser limitar custo, mas agora dispara um `log.warning` avisando que a explicação resultante pode não cobrir o que a defesa realmente viu. Ver `plans/xai-kernelshap-truncation-fix.md` para o detalhamento completo da correção.
 
 ## 8. Mudança 7 — batching nativo em ambos os backends, ausente no SyntaxSHAP
 
@@ -93,6 +103,6 @@ Isso é consistente com o que o design de ambos os experimentos já registra: a 
 | Máscara | baseline/background genérico | `[MASK]`→`[PAD]`→`[UNK]` com fallback; token id, nunca string |
 | Alvo | score de saída arbitrário/multi-classe via `target`/link | escalar `P(malign)` agregado, calculado dentro do `forward_func` |
 | Orçamento | `n_samples=25` fixo (captum) | `min(2M+2048, max_n_samples)`, nunca deixado no default |
-| Truncamento | `tokenizer.model_max_length` direto | guardado contra o sentinela absurdo do HF |
+| Truncamento | `tokenizer.model_max_length` direto | sem truncamento por padrão (bate com a defesa); opt-in via `max_length` explícito, com warning e guard contra o sentinela absurdo do HF (ver §7.1) |
 | Batching | manual (shap) / nativo mas não usado por padrão | usado explicitamente nos dois backends |
 | Backend | um só, por biblioteca | dois coexistindo atrás do mesmo contrato (`backend=`) |

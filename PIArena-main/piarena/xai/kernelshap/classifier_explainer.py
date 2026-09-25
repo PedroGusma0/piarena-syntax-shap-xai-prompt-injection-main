@@ -46,8 +46,11 @@ log = logging.getLogger(__name__)
 # HF's default `model_max_length` sentinel for tokenizers that never had an
 # explicit max length configured is an absurdly large int (commonly
 # 1_000_000_000_000_000_019_884_624_838_656 for some fast tokenizers) rather
-# than a usable value — falling back on it directly would defeat truncation
-# entirely. A well-known HF footgun, not specific to this codebase.
+# than a usable value. Only relevant when a caller explicitly passes
+# `max_length` and it happens to resolve to this sentinel (e.g. by reading
+# `tokenizer.model_max_length` themselves) — the default (`max_length=None`)
+# means no truncation at all, so this fallback never applies to it. A
+# well-known HF footgun, not specific to this codebase.
 _FALLBACK_MAX_LENGTH = 512
 _SENTINEL_MAX_LENGTH_THRESHOLD = 100_000
 
@@ -118,9 +121,15 @@ class ClassifierKernelExplainer:
             are scored per forward call — captum's own native batching knob
             for that backend, and the chunk size this class uses internally
             when batching the `shap` backend's `f(X)`.
-        max_length : truncation length for the tokenizer; `None` resolves to
-            `tokenizer.model_max_length`, guarded against the common HF
-            sentinel-default footgun (Risco #5).
+        max_length : truncation length for the tokenizer. `None` (the
+            default) means NO truncation — `context` is scored in full,
+            matching `PromptGuardDefense.execute`'s own untruncated scoring
+            (it calls the HF `pipeline` with no truncation kwarg). Pass an
+            explicit int to opt into truncating for cost control; doing so
+            logs a warning, since a truncated explanation may not reflect
+            what the defense actually saw if the injection falls past the
+            cutoff. An explicit value is still guarded against the common HF
+            `model_max_length` sentinel-default footgun (Risco #5).
         backend : "captum" (default, `captum.attr.KernelShap`) or "shap"
             (official `shap.KernelExplainer`) — which library actually solves
             the Shapley regression. The two coexist and produce the same
@@ -142,10 +151,35 @@ class ClassifierKernelExplainer:
         self.perturbations_per_eval = perturbations_per_eval
         self.backend = backend
 
-        configured_max_length = max_length or getattr(tokenizer, "model_max_length", None)
-        if not configured_max_length or configured_max_length > _SENTINEL_MAX_LENGTH_THRESHOLD:
-            configured_max_length = _FALLBACK_MAX_LENGTH
-        self.max_length = configured_max_length
+        # `max_length=None` (the default, i.e. no explicit request) means NO
+        # truncation — `_tokenize_content` must score exactly the same
+        # `context` `PromptGuardDefense.execute` scores (it calls the HF
+        # `pipeline` with no truncation kwarg at all). Falling back to
+        # `tokenizer.model_max_length` here used to silently truncate every
+        # call by default (~512 tokens for Prompt-Guard-86M's tokenizer),
+        # which for long contexts with a late-inserted injection produced an
+        # explanation of a prefix that never contained the injection at all
+        # — a misleading `predicted_label`/`injected_span` for a sample the
+        # (untruncated) defense had correctly blocked. Only an explicitly
+        # passed `max_length` opts into truncation now; it still gets
+        # guarded against the HF sentinel-default footgun.
+        if max_length is None:
+            self.max_length = None
+        else:
+            configured_max_length = max_length
+            if configured_max_length > _SENTINEL_MAX_LENGTH_THRESHOLD:
+                configured_max_length = _FALLBACK_MAX_LENGTH
+            self.max_length = configured_max_length
+            log.warning(
+                "max_length=%s is set — Kernel SHAP will truncate `context` before "
+                "explaining it, but PromptGuardDefense.execute scores the FULL "
+                "untruncated context. If the injected task falls past this "
+                "truncation point, predicted_label/p_malign/injected_span from "
+                "this explanation may not reflect what the defense actually saw. "
+                "Omit max_length (the default) to always explain exactly what was "
+                "scored.",
+                self.max_length,
+            )
 
         self.baseline_token_id = self._resolve_baseline_token_id(baseline_token)
         self.malign_indices = self._compute_malign_indices(model.config.id2label)
@@ -201,12 +235,20 @@ class ClassifierKernelExplainer:
         """Tokenize `text`, split into (prefix special tokens, content
         tokens, suffix special tokens) via `.word_ids()` (`None` = special
         token — the fast-tokenizer-native equivalent of the manual CLS/SEP
-        fix the SyntaxSHAP experiment needed for its dependency tree)."""
+        fix the SyntaxSHAP experiment needed for its dependency tree).
+
+        `self.max_length is None` (the default) means no truncation at all —
+        `text` is tokenized in full, matching `PromptGuardDefense.execute`'s
+        own untruncated scoring. Truncation only happens when `max_length`
+        was explicitly passed to the constructor."""
         import torch
 
-        encoded = self.tokenizer(
-            text, return_offsets_mapping=True, truncation=True, max_length=self.max_length,
-        )
+        if self.max_length is None:
+            encoded = self.tokenizer(text, return_offsets_mapping=True, truncation=False)
+        else:
+            encoded = self.tokenizer(
+                text, return_offsets_mapping=True, truncation=True, max_length=self.max_length,
+            )
         input_ids = encoded["input_ids"]
         offsets = encoded["offset_mapping"]
         word_ids = encoded.word_ids(0)
@@ -457,12 +499,15 @@ class ClassifierKernelExplainer:
             "_content_ids": content_ids,
             "_prefix_ids": prefix_ids,
             "_suffix_ids": suffix_ids,
+            "_content_offsets": content_offsets,
         }
+
+    _PRIVATE_KEYS = ("_feature_mask", "_content_ids", "_prefix_ids", "_suffix_ids", "_content_offsets")
 
     def explain_row(self, text: str, progress: bool = False) -> dict:
         """Explain a single, isolated span (`target_inst`/`injected_task`)."""
         result = self._explain_text(text, progress=progress)
-        for key in ("_feature_mask", "_content_ids", "_prefix_ids", "_suffix_ids"):
+        for key in self._PRIVATE_KEYS:
             result.pop(key, None)
         return result
 
@@ -481,7 +526,9 @@ class ClassifierKernelExplainer:
         matching bare `injected_task`, same as before.
         """
         result = self._explain_text(context, progress=progress)
-        for key in ("_feature_mask", "_content_ids", "_prefix_ids", "_suffix_ids"):
+        feature_mask = result["_feature_mask"]
+        content_offsets = result["_content_offsets"]
+        for key in self._PRIVATE_KEYS:
             result.pop(key, None)
 
         result["injected_span"] = None
@@ -498,9 +545,8 @@ class ClassifierKernelExplainer:
                 char_start = context.find(injected_task)
                 char_end = char_start + len(injected_task) if char_start != -1 else -1
             if char_start != -1:
-                # Re-tokenize (cheap — no model forward pass) to get the
-                # content-token offsets/feature ids to map the char span onto.
-                _, _, _, feature_mask, _, content_offsets = self._tokenize_content(context)
+                # Reuse the feature_mask/content_offsets `_explain_text` already
+                # computed above — no need to re-tokenize `context` a second time.
                 touched = [
                     fid for fid, (a, b) in zip(feature_mask.tolist(), content_offsets)
                     if b > a and a < char_end and b > char_start

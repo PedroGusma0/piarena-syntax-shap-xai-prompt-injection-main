@@ -100,7 +100,7 @@ Samples the defense did **not** block get `xai_result: null` — no explanation 
 - `max_n_samples` (default `20000`) — safety cap on the resolved `n_samples`.
 - `perturbations_per_eval` (default `8`) — batch size for scoring sampled coalitions: captum's own native batching knob for that backend, and the chunk size used internally to batch the `shap` backend's `f(X)`.
 - `baseline_token` (default `"mask"`) — which special token stands in for a "missing" word (`"mask"` | `"pad"` | `"unk"`, falls back through that order if the preferred one isn't defined on the tokenizer). This is a fixed reference value, not a sampled background distribution.
-- `max_length` (default `None`) — truncation length; `None` resolves to `tokenizer.model_max_length`, guarded against the tokenizer's own absurd sentinel default.
+- `max_length` (default `None`) — truncation length. `None` (the default) means **no truncation**: `context` is scored in full, matching `PromptGuardDefense.execute`'s own untruncated scoring (it calls the HF `pipeline` with no truncation kwarg at all). Set an explicit int only to bound cost for very long contexts — this is an opt-in accuracy/cost tradeoff, since a truncated explanation may no longer cover the same text the defense actually saw if the injected task falls past the cutoff; using it logs a warning. An explicit value is still guarded against the tokenizer's own absurd `model_max_length` sentinel default.
 
 ## Analysis
 

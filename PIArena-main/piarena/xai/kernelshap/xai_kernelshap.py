@@ -36,7 +36,9 @@ class KernelShapXAI(BaseXAI):
         "max_n_samples": 20000,
         "perturbations_per_eval": 8,
         "baseline_token": "mask",  # "mask" | "pad" | "unk" — see Risco #4 do plano
-        "max_length": None,  # None -> tokenizer.model_max_length (guarded, see Risco #5)
+        "max_length": None,  # None (default) -> no truncation; matches PromptGuardDefense's
+                             # own untruncated scoring. Set explicitly only to bound cost —
+                             # see docs/xai/kernelshap.md (logs a warning when active).
         "progress": True,
         # "captum" (default, captum.attr.KernelShap) | "shap" (official
         # shap.KernelExplainer). The two coexist as alternative computation
