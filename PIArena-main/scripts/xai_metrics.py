@@ -541,15 +541,17 @@ _TOKEN_DIV_RE = re.compile(r"(<div id='_tp_\w+_ind_(\d+)'\s*style=')([^']*)(')")
 # Defensive patch for a shap<0.52.0 + numpy>=2.0 compatibility bug: numpy 2.0
 # changed `repr(np.float64(x))` to the string `"np.float64(x)"` (previously
 # just `"x"`), and shap's text-plot color formatting (both the per-token
-# `background: rgba(...)` and the flow-header's `rgb(...)`, see
-# _strip_flow_header below) built those strings by stringifying tuples of
-# numpy scalars directly -- broke once numpy 2.0 landed (fixed upstream in
-# shap 0.52.0). An invalid CSS function like `rgba(np.float64(255.0), ...)`
-# gets silently dropped by the browser, which is why an affected render shows
-# every token with no background color at all instead of an error.
-# Unwrapping `np.float64(x)` -> `x` here means this script renders correctly
-# regardless of which shap version produced the HTML -- a no-op on an
-# already-patched shap, since the string never appears there.
+# `background: rgba(...)` and the flow bar's `rgb(...)`) built those strings
+# by stringifying tuples of numpy scalars directly -- broke once numpy 2.0
+# landed (fixed upstream only in shap 0.52.0, which requires Python >=3.12 --
+# not installable in this project's Python 3.10 env, where pip's ceiling is
+# shap==0.49.1, still affected). An invalid CSS function like
+# `rgba(np.float64(255.0), ...)` gets silently dropped by the browser, which
+# is why an affected render shows every token with no background color at
+# all instead of an error. Unwrapping `np.float64(x)` -> `x` here means this
+# script renders correctly regardless of which shap version produced the
+# HTML -- a no-op on an already-patched shap, since the string never appears
+# there.
 _NUMPY_SCALAR_REPR_RE = re.compile(r"np\.float64\(([^)]*)\)")
 
 
@@ -584,37 +586,6 @@ def _mark_injected_span(html: str, injected_span: dict | None) -> str:
     return _TOKEN_DIV_RE.sub(repl, html)
 
 
-# shap.plots.text() prefixes each sample with a "value flow" bar/legend (the
-# axis line + "base value"/"f(inputs)" labels + a nested <svg> tree of
-# per-token wedge/hover elements) before the actual highlighted paragraph
-# text -- confirmed by generating real output and inspecting it: this whole
-# region runs from the sample's first `<svg` up to (not including) the first
-# `<div id='_tp_...'>` token div, which is where the readable, colored text
-# actually starts. For a short sequence (this plot's original use case --
-# next-token generation over a handful of tokens) it's a legible mini force
-# plot; for a whole multi-sentence `context` (100+ tokens) the per-token
-# wedges/strokes overlap so densely it renders as an unreadable black smear
-# (made worse, but not caused, by a numpy>=2.0 + shap<0.52.0 compatibility
-# bug that breaks its rgb()/rgba() color strings -- see
-# plans/xai-kernelshap-promptguard.md). Stripped here rather than relying on
-# everyone's `shap` version being patched: the colored paragraph text below
-# it (kept intact) is the part that's actually useful for a long passage.
-_FLOW_HEADER_RE = re.compile(r"<svg\b.*?(?=<div id='_tp_)", re.DOTALL)
-
-
-def _strip_flow_header(html: str) -> str:
-    """Removes the decorative "value flow" bar described above, keeping the
-    highlighted paragraph text. A no-op (returns `html` unchanged) if the
-    `<svg` / `<div id='_tp_` markers aren't both found -- e.g. if shap's
-    internal HTML structure changes in a future version -- same fail-open
-    philosophy as `_mark_injected_span` above: a saliency map with the flow
-    bar beats no saliency map at all."""
-    m = _FLOW_HEADER_RE.search(html)
-    if not m:
-        return html
-    return html[:m.start()] + html[m.end():]
-
-
 def _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples=None):
     import shap  # official shap package — plotting only, not computation
     import matplotlib
@@ -644,7 +615,6 @@ def _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples
         try:
             body = shap.plots.text(explanation, display=False)
             body = _fix_numpy_scalar_colors(body)
-            body = _strip_flow_header(body)
             body = _mark_injected_span(body, xai.get("injected_span"))
         except Exception as e:  # pragma: no cover — defensive, don't let one bad sample kill the whole report
             body = f"<p>(failed to render: {e})</p>"
