@@ -538,6 +538,24 @@ _INJECTED_SPAN_COLOR = "#c9860f"
 # version bump than tweaking each already-existing token div's style).
 _TOKEN_DIV_RE = re.compile(r"(<div id='_tp_\w+_ind_(\d+)'\s*style=')([^']*)(')")
 
+# Defensive patch for a shap<0.52.0 + numpy>=2.0 compatibility bug: numpy 2.0
+# changed `repr(np.float64(x))` to the string `"np.float64(x)"` (previously
+# just `"x"`), and shap's text-plot color formatting (both the per-token
+# `background: rgba(...)` and the flow-header's `rgb(...)`, see
+# _strip_flow_header below) built those strings by stringifying tuples of
+# numpy scalars directly -- broke once numpy 2.0 landed (fixed upstream in
+# shap 0.52.0). An invalid CSS function like `rgba(np.float64(255.0), ...)`
+# gets silently dropped by the browser, which is why an affected render shows
+# every token with no background color at all instead of an error.
+# Unwrapping `np.float64(x)` -> `x` here means this script renders correctly
+# regardless of which shap version produced the HTML -- a no-op on an
+# already-patched shap, since the string never appears there.
+_NUMPY_SCALAR_REPR_RE = re.compile(r"np\.float64\(([^)]*)\)")
+
+
+def _fix_numpy_scalar_colors(html: str) -> str:
+    return _NUMPY_SCALAR_REPR_RE.sub(r"\1", html)
+
 
 def _mark_injected_span(html: str, injected_span: dict | None) -> str:
     """Adds a border around the token(s) covering `injected_span` (the
@@ -566,52 +584,35 @@ def _mark_injected_span(html: str, injected_span: dict | None) -> str:
     return _TOKEN_DIV_RE.sub(repl, html)
 
 
-_SAMPLES_PER_CHUNK = 50
-# Rendering every blocked sample's shap.plots.text() straight into the page
-# (default since --max-plot-samples became uncapped) makes the DOM itself
-# huge even once the file is downloaded -- opening it means the browser lays
-# out every sample at once. Chunking into groups of _SAMPLES_PER_CHUNK,
-# hidden past the first chunk until a "load more" click, keeps the initial
-# render cheap without limiting how many samples the file actually contains.
+# shap.plots.text() prefixes each sample with a "value flow" bar/legend (the
+# axis line + "base value"/"f(inputs)" labels + a nested <svg> tree of
+# per-token wedge/hover elements) before the actual highlighted paragraph
+# text -- confirmed by generating real output and inspecting it: this whole
+# region runs from the sample's first `<svg` up to (not including) the first
+# `<div id='_tp_...'>` token div, which is where the readable, colored text
+# actually starts. For a short sequence (this plot's original use case --
+# next-token generation over a handful of tokens) it's a legible mini force
+# plot; for a whole multi-sentence `context` (100+ tokens) the per-token
+# wedges/strokes overlap so densely it renders as an unreadable black smear
+# (made worse, but not caused, by a numpy>=2.0 + shap<0.52.0 compatibility
+# bug that breaks its rgb()/rgba() color strings -- see
+# plans/xai-kernelshap-promptguard.md). Stripped here rather than relying on
+# everyone's `shap` version being patched: the colored paragraph text below
+# it (kept intact) is the part that's actually useful for a long passage.
+_FLOW_HEADER_RE = re.compile(r"<svg\b.*?(?=<div id='_tp_)", re.DOTALL)
 
 
-def _load_more_button_html(total_n: int, n_chunks: int, chunk_size: int = _SAMPLES_PER_CHUNK) -> str:
-    """Vanilla JS, no library -- this is a plain file opened straight off
-    disk in a browser (not an Artifact), so there's no CDN to load from
-    reliably anyway. Reveals one hidden `.chunk` div per click; hides itself
-    once every chunk is shown."""
-    return f"""
-<div style="margin:20px 0;">
-  <button id="load-more-btn" onclick="__loadMoreSamples()"
-          style="padding:8px 18px;font-size:14px;cursor:pointer;">Carregar mais amostras</button>
-  <span id="load-more-status" style="margin-left:10px;color:#666;"></span>
-</div>
-<script>
-(function() {{
-  var chunks = document.querySelectorAll('.chunk');
-  var shown = 1;
-  var total = {total_n};
-  var chunkSize = {chunk_size};
-  var nChunks = {n_chunks};
-  function updateStatus() {{
-    var visible = Math.min(shown * chunkSize, total);
-    document.getElementById('load-more-status').textContent =
-      '(' + visible + ' de ' + total + ' amostras mostradas)';
-    if (shown >= nChunks) {{
-      document.getElementById('load-more-btn').style.display = 'none';
-    }}
-  }}
-  window.__loadMoreSamples = function() {{
-    if (shown < chunks.length) {{
-      chunks[shown].hidden = false;
-      shown++;
-      updateStatus();
-    }}
-  }};
-  updateStatus();
-}})();
-</script>
-"""
+def _strip_flow_header(html: str) -> str:
+    """Removes the decorative "value flow" bar described above, keeping the
+    highlighted paragraph text. A no-op (returns `html` unchanged) if the
+    `<svg` / `<div id='_tp_` markers aren't both found -- e.g. if shap's
+    internal HTML structure changes in a future version -- same fail-open
+    philosophy as `_mark_injected_span` above: a saliency map with the flow
+    bar beats no saliency map at all."""
+    m = _FLOW_HEADER_RE.search(html)
+    if not m:
+        return html
+    return html[:m.start()] + html[m.end():]
 
 
 def _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples=None):
@@ -642,6 +643,8 @@ def _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples
         )
         try:
             body = shap.plots.text(explanation, display=False)
+            body = _fix_numpy_scalar_colors(body)
+            body = _strip_flow_header(body)
             body = _mark_injected_span(body, xai.get("injected_span"))
         except Exception as e:  # pragma: no cover — defensive, don't let one bad sample kill the whole report
             body = f"<p>(failed to render: {e})</p>"
@@ -650,19 +653,12 @@ def _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples
             break
 
     n = len(sample_blocks)
-    chunks = [sample_blocks[i:i + _SAMPLES_PER_CHUNK] for i in range(0, n, _SAMPLES_PER_CHUNK)]
-
     html_parts = [f"<html><head><meta charset='utf-8'><title>{xai_method} saliency maps ({attack})</title></head><body>"]
-    for i, chunk in enumerate(chunks):
-        hidden_attr = "" if i == 0 else " hidden"
-        html_parts.append(f"<div class='chunk'{hidden_attr}>" + "\n".join(chunk) + "</div>")
-    if len(chunks) > 1:
-        html_parts.append(_load_more_button_html(n, len(chunks)))
+    html_parts.extend(sample_blocks)
     html_parts.append("</body></html>")
     with open(os.path.join(plots_dir, "saliency_maps.html"), "w", encoding="utf-8") as f:
         f.write("\n".join(html_parts))
-    print(f"Wrote {os.path.join(plots_dir, 'saliency_maps.html')} "
-          f"({n} sample(s), {len(chunks)} chunk(s) of {_SAMPLES_PER_CHUNK})")
+    print(f"Wrote {os.path.join(plots_dir, 'saliency_maps.html')} ({n} sample(s))")
 
     _render_fidelity_acc_bars(per_sample, plots_dir)
     _render_alignment_histogram(per_sample, plots_dir)
