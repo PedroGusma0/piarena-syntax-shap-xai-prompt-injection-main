@@ -328,11 +328,13 @@ def main(args):
             response,
             ground_truth=target_task_answer,
             task_prompt=f"{target_inst}\n\n{context}",
+            llm=llm,
         )
         result_dp["asr"] = asr_evaluator(
             response,
             ground_truth=injected_task_answer,
             task_prompt=injected_task,
+            llm=llm,
         )
         print(f"[{idx+1}/{len(dataset)}] Evaluation phase done ({time.time() - phase_t0:.1f}s).")
 
@@ -371,6 +373,17 @@ def main(args):
         print("\n")
         nice_print(f"Utility: {result_dp['utility']}, {round(sum([r['utility'] for r in evaluation_result.values()]) / len(evaluation_result), 2)}")
         nice_print(f"ASR: {result_dp['asr']}, {round(sum([r['asr'] for r in evaluation_result.values()]) / len(evaluation_result), 2)}")
+
+        # Frees cached-but-unused blocks back to the driver after every
+        # sample. Attack/Defense/XAI/Evaluation each allocate tensors of
+        # different, sample-dependent shapes (varying text length, kernelshap's
+        # n_samples growing with word count, ...) -- PyTorch's caching
+        # allocator doesn't release freed memory on its own, so across many
+        # samples with varying shapes it fragments and the "reserved" pool
+        # keeps growing even without a real per-sample leak, eventually
+        # hitting a CUDA OOM well before the model weights alone would
+        # explain it.
+        torch.cuda.empty_cache()
 
     if wandb_enabled:
         # Final aggregate summary — mirrors scripts/xai_metrics.py's
