@@ -290,17 +290,32 @@ def main(args):
                       "(see plans/xai-syntaxshap-promptguard.md's cost analysis) — "
                       "per-sentence/forward-pass progress prints below as it runs.")
                 try:
-                    result_dp["xai_result"] = xai.explain(
-                        target_inst=target_inst,
-                        context=injected_context,
-                        injected_task=injected_task,
-                        # `attack_name` (local var), not `args.attack` — when
-                        # --attack_path loads a cached attack result, attack_name
-                        # is derived from the cache file, and args.attack can be
-                        # a stale/default value unrelated to what actually
-                        # produced injected_context.
-                        attack_name=attack_name,
-                    )
+                    # Frees the backend LLM's VRAM for the duration of the
+                    # explain call. Qwen3-4B-Instruct-2507 (~8GB+ resident on
+                    # this GPU regardless of block/pass, see Model.query's
+                    # early-return-on-block in defenses) plus Kernel SHAP's
+                    # own batched (`perturbations_per_eval`) forward passes
+                    # over a long `context` was hitting real CUDA OOMs on the
+                    # RAG/summarization datasets' longer documents — restored
+                    # in `finally` unconditionally, since the Evaluation phase
+                    # right after this block reuses the same `llm` object
+                    # (via `utility_evaluator`/`asr_evaluator`) for every
+                    # sample, blocked or not.
+                    llm.offload()
+                    try:
+                        result_dp["xai_result"] = xai.explain(
+                            target_inst=target_inst,
+                            context=injected_context,
+                            injected_task=injected_task,
+                            # `attack_name` (local var), not `args.attack` — when
+                            # --attack_path loads a cached attack result, attack_name
+                            # is derived from the cache file, and args.attack can be
+                            # a stale/default value unrelated to what actually
+                            # produced injected_context.
+                            attack_name=attack_name,
+                        )
+                    finally:
+                        llm.restore()
                     xai_phase_s = time.time() - phase_t0
                     print(f"[{idx+1}/{len(dataset)}] XAI phase done ({xai_phase_s:.1f}s).")
                 except Exception as e:

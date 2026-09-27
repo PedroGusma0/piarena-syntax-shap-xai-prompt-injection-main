@@ -152,6 +152,26 @@ class Model():
             if not getattr(self.model.config, "is_encoder_decoder", False):
                 self.tokenizer.padding_side = "left"
 
+    def offload(self):
+        """Moves the underlying HF model off the GPU to free VRAM for another
+        GPU-resident consumer (e.g. an `--xai` classifier explainer running a
+        batched Kernel SHAP forward pass, which can spike memory well past
+        what's left once this model's weights + KV-cache already occupy most
+        of a single GPU). No-op for API-backed models (`self.tokenizer is
+        None` — Azure/OpenAI/Google/Anthropic never load local weights)."""
+        if self.tokenizer is None:
+            return
+        self._offload_device = self.model.device
+        self.model.to("cpu")
+        torch.cuda.empty_cache()
+
+    def restore(self):
+        """Moves the model back to the GPU device it was offloaded from.
+        No-op for API-backed models, matching `offload()`."""
+        if self.tokenizer is None:
+            return
+        self.model.to(self._offload_device)
+
     def _normalize_messages(self, messages: Union[str, List[Dict[str, str]]]) -> List[Dict[str, str]]:
         if isinstance(messages, str):
             return [
