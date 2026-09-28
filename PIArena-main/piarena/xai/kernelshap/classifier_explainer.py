@@ -325,7 +325,21 @@ class ClassifierKernelExplainer:
                 ).logits
                 probs = torch.softmax(logits, dim=-1)
                 p_malign = probs[:, self.malign_indices].sum(dim=-1)
-            return p_malign.to(content_ids_batch.device)
+            result = p_malign.to(content_ids_batch.device)
+            # Captum's KernelShap/shap.KernelExplainer call this closure
+            # hundreds of times in a row for one sample (n_samples /
+            # perturbations_per_eval batches, e.g. ~695 calls for a
+            # 1753-word gov_report_long context) -- each freed batch's
+            # tensors get cached rather than returned to the driver, and
+            # observed in practice (a gov_report_long sample OOM-ing after
+            # 10 successful same-shape iterations) as allocator fragmentation
+            # accumulating across calls, not just a single call's own peak.
+            # Frees cached-but-unused blocks after every call instead of only
+            # once per sample (main.py's own end-of-sample empty_cache) --
+            # trades a GPU sync per call for less fragmentation risk on long
+            # contexts.
+            torch.cuda.empty_cache()
+            return result
 
         return forward
 

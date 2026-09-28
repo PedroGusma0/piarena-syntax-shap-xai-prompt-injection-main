@@ -34,7 +34,7 @@ class KernelShapXAI(BaseXAI):
         # "auto" resolves per-call to min(2*M + 2048, max_n_samples).
         "n_samples": "auto",
         "max_n_samples": 20000,
-        "perturbations_per_eval": 8,
+        "perturbations_per_eval": 2,
         "baseline_token": "mask",  # "mask" | "pad" | "unk" — see Risco #4 do plano
         "max_length": None,  # None (default) -> no truncation; matches PromptGuardDefense's
                              # own untruncated scoring. Set explicitly only to bound cost —
