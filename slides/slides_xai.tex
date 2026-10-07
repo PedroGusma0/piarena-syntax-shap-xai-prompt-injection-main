@@ -1,0 +1,228 @@
+% Compilar:  ./compilar.sh   (tectonic em ../.venv-tex)
+\documentclass[aspectratio=169]{beamer}
+\newcommand{\ciPastaAssets}{../cissa-beamer-tema/cissa-beamer/assets/}
+\newcommand{\ciPastaFontes}{../cissa-beamer-tema/cissa-beamer/fonts/}
+\usetheme{CISSA}
+
+\makeatletter\let\cifs\ci@fs\makeatother
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{adjustbox}
+\usepackage{amsmath}
+\usepackage{array}
+\graphicspath{{../figs/}{../figs/bar_global/}}
+
+% posiciona qualquer conteúdo em coordenadas absolutas (fração da página, a partir do canto superior esquerdo)
+\newcommand{\figat}[4][north west]{%
+  \begin{tikzpicture}[remember picture,overlay]
+    \node[anchor=#1,inner sep=0pt] at ($(current page.north west)+(#2\paperwidth,-#3\paperheight)$){#4};
+  \end{tikzpicture}}
+% gráfico de barras: só as barras do topo (cortando a parte de baixo)
+\newcommand{\barras}[3]{\adjustbox{trim=0 {#3\height} 0 0,clip,width=#2\paperwidth}{\includegraphics{bar_global_#1.png}}}
+\newcommand{\legenda}[1]{{\cifs{9}{11}\color{ciCinza}#1}}
+\newcommand{\tabfont}{\fontsize{8.2}{10.4}\selectfont}
+
+\begin{document}
+
+% ============================================================ CAPA
+\ciCapa{Adicionando um motor de XAI ao PI Arena}{}
+
+% ============================================================ 1. ARQUITETURA
+\begin{frame}{Arquitetura}
+  \figat{0.0824}{0.24}{%
+    \IfFileExists{../figs/arquitetura_kernelshap.png}%
+      {\includegraphics[height=0.68\paperheight]{arquitetura_kernelshap.png}}%
+      {\fcolorbox{ciAzulTitulo}{ciFundo}{\parbox[c][0.55\paperheight][c]{0.40\paperwidth}{\centering\color{ciCinza}[figs/arquitetura\_kernelshap.png]}}}}
+  \figat{0.46}{0.30}{\parbox{0.44\paperwidth}{\color{white}\cifs{13}{18}%
+    Estamos querendo responder a pergunta: \ciAzul{Por que o classificador decidiu bloquear?}\\[8pt]
+    \cifs{11}{15}O módulo de XAI só entra em ação quando o Prompt Guard marca o prompt como \textbf{maligno}; ele gera a explicação (Kernel SHAP), os mapas de saliência e as métricas de qualidade da explicação.}}
+\end{frame}
+
+\begin{frame}{PI Arena: o que foi incluído}
+  \begin{ciLista}
+    \item \textbf{4 ataques} (prefixo + tarefa injetada): \texttt{direct} (sem prefixo), \texttt{ignore} (``Ignore previous instructions.''), \texttt{completion} (``Answer: task complete.''), \texttt{combined} (os dois)
+    \item \textbf{4 categorias} de tarefa injetada: access\_denial, content\_promotion, infrastructure\_failure, phishing\_injection
+    \item \textbf{9 datasets}: squad\_v2, dolly (closed\_qa, information\_extraction, summarization), RAG (msmarco, hotpotqa, nq), longos (multi\_news, gov\_report)
+    \item \textbf{Objetivo:} entender que características dos prompts dos datasets do PI Arena levam ao bloqueio do prompt
+  \end{ciLista}
+\end{frame}
+
+% ============================================================ 2. MÉTRICAS
+\begin{frame}{Métricas: Fidelity($t$)}
+  \ciCitacao{Métricas de XAI adaptadas do artigo do SyntaxSHAP (Amara et al., 2024).}
+  \vspace{4pt}
+  {\cifs{13}{18}
+  Mantém só os $t\%$ tokens de maior $|$atribuição$|$, mascara o resto e compara a probabilidade de a entrada ser maliciosa:
+  \[ \mathrm{Fid}(t) = f(x) - f(\tilde x^{(t)}) \]
+  \ciAzul{Perto de 0} $\Rightarrow$ os tokens escolhidos pela explicação bastam sozinhos para sustentar a decisão. Longe de 0 $\Rightarrow$ a explicação está incompleta ou aponta os tokens errados.\par}
+\end{frame}
+
+\begin{frame}{Métricas: acc@1($t$)}
+  \vspace{2pt}{\cifs{13}{18}
+  Com o mesmo texto mascarado, verifica se a \textbf{decisão de bloqueio} (malicioso se $f \geq 0{,}5$) continua igual à do texto completo:
+  \[ \mathrm{acc@1}(t) = \mathbf{1}\!\left[\big(f(\tilde x^{(t)}) \geq 0{,}5\big) = \big(f(x) \geq 0{,}5\big)\right] \]
+  Taxa média sobre as amostras explicadas. \ciAzul{1,0} $\Rightarrow$ manter só os $t\%$ tokens mais importantes já preserva o veredito em todas as amostras. No artigo original é acc@$K$ ($K{=}10$); aqui a decisão é binária, logo $K{=}1$.\par}
+\end{frame}
+
+\begin{frame}{Métricas: Alinhamento}
+  \vspace{2pt}{\cifs{13}{18}
+  Verifica se os \textbf{tokens mais importantes} (os de maior valor de Shapley) estão dentro da \textbf{tarefa injetada}, o trecho que o PI Arena sempre insere no contexto.\par
+  \vspace{8pt}
+  \ciAzul{Por que importa:} mede se a explicação é \textbf{interpretável}. A intuição humana é que, se o classificador bloqueou, o que pesou na decisão deve ser a injeção.\par
+  \vspace{8pt}
+  \ciAzul{Como ler:} perto de \textbf{1,0}, a atenção da explicação se concentra na injeção; perto de \textbf{0,5}, é como se os tokens fossem escolhidos ao acaso.\par
+  \vspace{8pt}
+  \ciLaranja{Limitação da métrica:} os tokens importantes \textbf{não estão espalhados ao acaso} pela injeção, estão \textbf{concentrados no prefixo} (ex.: \texttt{Ignore previous instructions.}). Como a média considera a injeção inteira, o valor fica perto de 0,6 mesmo quando a explicação localiza o ataque corretamente.\par}
+\end{frame}
+
+% ============================================================ 3. RESULTADOS GERAIS
+\newcommand{\cab}{%
+  \vspace{-14pt}\begin{adjustbox}{center,max width=0.72\paperwidth}
+  \tabfont
+  \begin{tabular}{llcccccc}
+  \toprule
+  \textbf{Dataset} & \textbf{Ataque} & $n$ & \textbf{Fid(0,5)} & \textbf{acc@1(0,5)} & \textbf{Alin.} & \textbf{ASR} & \textbf{Utility} \\
+  \midrule}
+\newcommand{\rab}{\bottomrule\end{tabular}\end{adjustbox}}
+
+\begin{frame}{Resultados gerais (1/3)}
+  \cab
+  \multirow{4}{*}{squad\_v2} & Ignore     & 200 & $2{,}99\times10^{-5}$ & 1,00 & 0,598 & 0,000 & 0,000 \\
+   & Completion & 199 & 0,038 & 0,960 & 0,616 & 0,005 & 0,000 \\
+   & Direct     & 134 & 0,277 & 0,679 & 0,623 & 0,240 & 0,205 \\
+   & Combined   & 200 & $2{,}00\times10^{-5}$ & 1,00 & 0,582 & 0,000 & 0,000 \\
+  \midrule
+  \multirow{4}{*}{dolly\_closed\_qa} & Ignore     & 200 & 0,005 & 0,995 & 0,589 & 0,000 & 0,000 \\
+   & Completion & 199 & 0,035 & 0,970 & 0,603 & 0,005 & 0,000 \\
+   & Direct     & 138 & 0,331 & 0,638 & 0,619 & 0,260 & 0,210 \\
+   & Combined   & 200 & 0,004 & 0,995 & 0,579 & 0,000 & 0,000 \\
+  \midrule
+  \multirow{4}{*}{dolly\_info\_extraction} & Ignore     & 198 & 0,002 & 1,000 & 0,592 & 0,010 & 0,005 \\
+   & Completion & 198 & 0,036 & 0,980 & 0,601 & 0,010 & 0,005 \\
+   & Direct     & 129 & 0,326 & 0,643 & 0,607 & 0,285 & 0,240 \\
+   & Combined   & 198 & $2{,}34\times10^{-4}$ & 1,000 & 0,582 & 0,010 & 0,005 \\
+  \rab
+\end{frame}
+
+\begin{frame}{Resultados gerais (2/3)}
+  \cab
+  \multirow{4}{*}{dolly\_summarization} & Ignore     & 193 & 0,006 & 0,990 & 0,578 & 0,030 & 0,020 \\
+   & Completion & 190 & 0,051 & 0,953 & 0,593 & 0,040 & 0,030 \\
+   & Direct     & 114 & 0,324 & 0,605 & 0,605 & 0,390 & 0,260 \\
+   & Combined   & 193 & 0,008 & 0,990 & 0,581 & 0,025 & 0,010 \\
+  \midrule
+  \multirow{4}{*}{msmarco\_rag} & Ignore     & 94 & 0,081 & 0,904 & 0,586 & 0,030 & 0,050 \\
+   & Completion & 88 & 0,291 & 0,693 & 0,592 & 0,040 & 0,100 \\
+   & Direct     & 64 & 0,462 & 0,484 & 0,578 & 0,140 & 0,320 \\
+   & Combined   & 94 & 0,108 & 0,883 & 0,583 & 0,030 & 0,040 \\
+  \midrule
+  \multirow{4}{*}{hotpotqa\_rag} & Ignore     & 81 & 0,060 & 0,938 & 0,580 & 0,110 & 0,100 \\
+   & Completion & 71 & 0,210 & 0,817 & 0,584 & 0,130 & 0,190 \\
+   & Direct     & 49 & 0,348 & 0,612 & 0,620 & 0,160 & 0,370 \\
+   & Combined   & 81 & 0,076 & 0,914 & 0,582 & 0,110 & 0,090 \\
+  \rab
+\end{frame}
+
+\begin{frame}{Resultados gerais (3/3)}
+  \cab
+  \multirow{4}{*}{nq\_rag} & Ignore     & 71 & 0,146 & 0,831 & 0,585 & 0,170 & 0,160 \\
+   & Completion & 56 & 0,336 & 0,643 & 0,611 & 0,270 & 0,300 \\
+   & Direct     & 40 & 0,484 & 0,450 & 0,612 & 0,240 & 0,500 \\
+   & Combined   & 66 & 0,102 & 0,879 & 0,593 & 0,210 & 0,230 \\
+  \midrule
+  \multirow{4}{*}{multi\_news\_long} & Ignore     & 48 & 0,199 & 0,771 & 0,583 & 0,460 & 0,079 \\
+   & Completion & 32 & 0,266 & 0,719 & 0,611 & 0,520 & 0,108 \\
+   & Direct     & 18 & 0,424 & 0,556 & 0,651 & 0,650 & 0,122 \\
+   & Combined   & 46 & 0,110 & 0,891 & 0,600 & 0,450 & 0,086 \\
+  \midrule
+  \multirow{4}{*}{gov\_report\_long} & Ignore     & 7 & 0,065 & 0,857 & 0,592 & 0,820 & 0,134 \\
+   & Completion & 5 & 0,211 & 0,800 & 0,550 & 0,800 & 0,153 \\
+   & Direct     & 0 & --- & --- & --- & 0,820 & 0,157 \\
+   & Combined   & 7 & 0,019 & 1,000 & 0,597 & 0,820 & 0,141 \\
+  \rab
+\end{frame}
+
+% ============================================================ 4. VOCABULÁRIO DE INJEÇÃO
+\begin{frame}{Vocabulário de injeção}
+  \figat{0.0824}{0.215}{\parbox{0.84\paperwidth}{\color{white}\cifs{11}{14}\ciAzul{As palavras que o Prompt Guard mais relaciona a injeção/jailbreak} (Exemplo: squad\_v2, $|$SHAP$|$ médio por palavra)}}
+  \figat{0.0824}{0.36}{\barras{squad_v2_ignore}{0.40}{0.47}}
+  \figat{0.5000}{0.36}{\barras{squad_v2_completion}{0.40}{0.47}}
+  \figat{0.0824}{0.835}{\legenda{\textbf{Ignore}: \texttt{Ignore}, \texttt{previous}, \texttt{instructions}}}
+  \figat{0.5000}{0.835}{\legenda{\textbf{Completion}: \texttt{Answer:} domina}}
+\end{frame}
+
+\begin{frame}{Mapa de saliência}
+  \figat{0.0824}{0.24}{\includegraphics[width=0.52\paperwidth]{image.png}}
+  \figat{0.64}{0.28}{\parbox{0.28\paperwidth}{\color{white}\cifs{12}{16}%
+    Ataque \texttt{ignore}, squad\_v2, amostra 0.\\[6pt]
+    \ciLaranja{Vermelho} aumenta P(malign); \ciAzul{azul} reduz.\\[6pt]
+    \texttt{Ignore previous instructions.} concentra quase toda a atribuição.}}
+\end{frame}
+
+\begin{frame}{Prefixos e palavras-chave}
+  \begin{ciLista}
+    \item \textbf{Ignore:} \texttt{Ignore} 0,46 + \texttt{previous} 0,16 + \texttt{instructions.} 0,18 $\approx$ \textbf{0,80} da probabilidade, em 3 palavras
+    \item \textbf{Completion:} \texttt{Answer:} sozinho vale \textbf{0,63}; ``task complete.'' quase nada (0,06)
+    \item \textbf{Classe prevista segue o gatilho:} \texttt{ignore}/\texttt{combined} $\to$ JAILBREAK (99\%); \texttt{completion} $\to$ INJECTION (85\%)
+    \item O texto injetado depois do gatilho pesa pouco; \textbf{URLs de phishing têm atribuição negativa} (média $-0{,}012$)
+  \end{ciLista}
+\end{frame}
+
+\begin{frame}{Sem prefixo: direct}
+  \figat{0.0824}{0.30}{\barras{squad_v2_direct}{0.40}{0.47}}
+  \figat{0.54}{0.30}{\parbox{0.38\paperwidth}{\color{white}\cifs{12}{16}%
+    Sem gatilho fixo, o modelo reage a \textbf{verbos no imperativo dirigidos ao assistente} que desviam a saída:\\[6pt]
+    \ciLaranja{\texttt{imitate, emulate, simulate, insert, add, append, respond, reply}}\\[6pt]
+    Palavras do cenário (\texttt{notification}, \texttt{alert}, \texttt{subscription}) empurram para benigno.}}
+\end{frame}
+
+\begin{frame}{Categorias (direct)}
+  \vspace{-14pt}\begin{adjustbox}{center,max width=0.72\paperwidth}
+  \fontsize{7.8}{10}\selectfont
+  \begin{tabular}{>{\raggedright\arraybackslash}p{0.17\paperwidth}>{\raggedright\arraybackslash}p{0.15\paperwidth}>{\raggedright\arraybackslash}p{0.40\paperwidth}}
+  \toprule
+  \textbf{Categoria} & \textbf{Bloqueado (squad / closed\_qa)} & \textbf{Como e por que} \\
+  \midrule
+  infrastructure\_failure & 41/50 \quad 47/50 & imita mensagem de sistema e usa comandos (\texttt{emulate}, \texttt{halt}, \texttt{terminate}): é a mais bloqueada em 7 de 8 datasets \\[3pt]
+  access\_denial & 29/50 \quad 33/50 & comandos explícitos (\texttt{insert}, \texttt{terminate}), mas em tom de aviso ao usuário \\[3pt]
+  content\_promotion & 30/50 \quad 36/50 & elogio a marcas; bloqueia por verbos como \texttt{integrate}/\texttt{incorporate}, não pelo tema \\[3pt]
+  phishing\_injection & 34/50 \quad 22/50 & recomendação fluente com link; a URL não contribui, o bloqueio depende do verbo de abertura \\
+  \bottomrule
+  \end{tabular}
+  \end{adjustbox}
+\end{frame}
+
+% ============================================================ 5. RESULTADOS
+\begin{frame}{Perguntas de pesquisa}
+  \ciRotulo{RQ1 --- os tokens mais importantes coincidem com o injected task?}
+  {\cifs{12}{16}\hspace{0.03\paperwidth}\ciAzul{Sim, nos prefixos:} o top-1 está no span em 93--100\% dos casos (ignore/completion/combined). O percentil médio ($\approx$0,6) é diluído: prefixo 0,99, resto do payload 0,54.\par}
+  \ciRotulo{RQ2 --- as explicações são fiéis ao reduzir aos tokens mais importantes?}
+  {\cifs{12}{16}\hspace{0.03\paperwidth}\ciAzul{Depende do ataque:} Fidelity $\approx$ 0 e acc@1 $\approx$ 1 em ignore/combined; Fidelity 0,3--0,9 e acc@1 0,06--0,68 em direct, onde a decisão depende de vários verbos.\par}
+\end{frame}
+
+% ============================================================ 6. LIMITAÇÕES
+\begin{frame}{Limitações}
+  \begin{ciLista}
+    \item 9 de 16 datasets do PI Arena; análise empírica
+    \item Algumas explicações podem não estar alinhadas às expectativas humanas
+    \item Poucos prompts explicáveis em datasets com alta penetrabilidade (gov\_report: 5--7 por ataque)
+    \item Custo de memória da atenção do Prompt Guard dificulta incluir datasets longos
+  \end{ciLista}
+\end{frame}
+
+% ============================================================ 7. FUTURO
+\begin{frame}{Futuro}
+  \begin{ciLista}
+    \item Escala: clone do defensor para o motor de XAI explicar enquanto o defensor em produção segue classificando
+    \item O motor de ataque usar a resposta do XAI para melhorar o ataque
+    \item Novas métricas de XAI de artigos estado-da-arte
+    \item SyntaxSHAP contra PAIR, TAP, GCG (nanogcg) e ofuscações (combined, ignore)
+    \item Outras defesas: PISanitizer, DataSentinel, PromptArmor, AttentionTracker, DataFilter, SecAlign, PromptLocate
+    \item Comparar com LIME, Partition SHAP, FeatureAblation e SampleShapley
+    \item Benchmarks de agentes: AgentDojo e InjecAgent
+  \end{ciLista}
+\end{frame}
+
+\ciFim{Obrigado!}
+\end{document}

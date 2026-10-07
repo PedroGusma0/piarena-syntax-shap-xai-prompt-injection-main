@@ -1,0 +1,267 @@
+%% ---------------------------------------------------------------------------
+%%  beamerthemeCISSA.sty
+%%  Tema Beamer do CISSA (Centro Integrado de Segurança em Sistemas Avançados)
+%%  Reproduz o template "PITCH DPP": fundo escuro, DM Sans, azul/laranja.
+%%
+%%  Compilar com XeLaTeX ou LuaLaTeX (usa fontspec), DUAS vezes
+%%  (as formas decorativas usam "remember picture" do TikZ).
+%%
+%%  Uso:
+%%    \documentclass[aspectratio=169]{beamer}
+%%    \usetheme{CISSA}
+%%
+%%  Layouts (escolhidos ANTES de \begin{frame}, valem só para aquele slide):
+%%    \ciCapa{Título}{Subtítulo}      slide de capa (comando completo)
+%%    \ciFim{Obrigado!}               slide final   (comando completo)
+%%    \cilayout{conteudo}             (padrão) título azul à esquerda
+%%    \cilayout{imagem}               título branco + imagem circular à direita
+%%    \cilayout{secao}                título centralizado
+%%
+%%  Pastas (podem ser redefinidas ANTES de \usetheme):
+%%    \newcommand{\ciPastaAssets}{assets/}   logos e formas decorativas
+%%    \newcommand{\ciPastaFontes}{fonts/}    arquivos DMSans-*.ttf
+%% ---------------------------------------------------------------------------
+\ProvidesPackage{beamerthemeCISSA}[2026/10/06 Tema Beamer CISSA]
+
+\RequirePackage{fontspec}
+\RequirePackage{xcolor}
+\RequirePackage{etoolbox}
+\RequirePackage{tikz}
+\usetikzlibrary{calc,shapes.misc}
+
+%% ------------------------------------------------------------------ pastas
+\providecommand{\ciPastaAssets}{assets/}
+\providecommand{\ciPastaFontes}{fonts/}
+
+%% ------------------------------------------------------------------ cores
+\definecolor{ciFundo}{HTML}{1E1E1E}        % fundo escuro dos slides
+\definecolor{ciAzulTitulo}{HTML}{008DFF}   % azul de títulos / destaques
+\definecolor{ciAzulForma}{HTML}{145B96}    % azul das formas decorativas
+\definecolor{ciLaranja}{HTML}{FF5C00}      % laranja (bolinhas, gradientes)
+\definecolor{ciCinza}{HTML}{E6E6E6}        % cinza das formas decorativas
+\definecolor{ciCaixaA}{HTML}{063467}       % caixa de destaque (início do gradiente)
+\definecolor{ciCaixaB}{HTML}{1B2026}       % caixa de destaque (fim do gradiente)
+
+\setbeamercolor{normal text}{fg=white,bg=ciFundo}
+\setbeamercolor{background canvas}{bg=ciFundo}
+\setbeamercolor{structure}{fg=ciAzulTitulo}
+
+
+%% -------------------------------------------- escala (referência 720pt de largura)
+% Os tamanhos de fonte foram medidos num slide de 720pt x 405pt; \ci@unit
+% reescala tudo proporcionalmente à largura real da página do Beamer.
+\newlength{\ci@unit}
+\AtBeginDocument{\setlength{\ci@unit}{\dimexpr\paperwidth/720\relax}}
+\newcommand{\ci@fs}[2]{\fontsize{#1\ci@unit}{#2\ci@unit}\selectfont\ignorespaces}
+
+%% ------------------------------------------------------------------ fontes
+\setsansfont[
+  Path=\ciPastaFontes, Extension=.ttf,
+  UprightFont=*-Regular, BoldFont=*-Bold,
+  ItalicFont=*-Italic, BoldItalicFont=*-BoldItalic
+]{DMSans}
+\renewcommand{\familydefault}{\sfdefault}
+\newfontfamily\ci@black[Path=\ciPastaFontes, Extension=.ttf]{DMSans-Black}
+\usefonttheme{professionalfonts}
+
+%% ------------------------------------------------------------ estrutura geral
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{headline}{}
+\setbeamertemplate{footline}{}
+\setbeamersize{text margin left=0.0838\paperwidth,
+               text margin right=0.0838\paperwidth}
+% conteúdo alinhado ao topo (equivale a \begin{frame}[t])
+\beamer@centeredfalse
+
+%% --------------------------------------------------------- escolha de layout
+\newcommand{\ci@layout}{conteudo}
+\newcommand{\ci@nextlayout}{conteudo}
+\newcommand{\cilayout}[1]{\gdef\ci@nextlayout{#1}}
+\BeforeBeginEnvironment{frame}{%
+  \global\let\ci@layout\ci@nextlayout
+  \gdef\ci@nextlayout{conteudo}}
+
+%% imagem circular do layout "imagem" (trocável pelo usuário)
+\providecommand{\ciImagemLateral}{img-cadeado-circulo.png}
+
+%% ------------------------------------------------------ comandos de texto
+\newcommand{\ciAzul}[1]{\textcolor{ciAzulTitulo}{#1}}
+\newcommand{\ciLaranja}[1]{\textcolor{ciLaranja}{#1}}
+\newcommand{\ciSeta}{\tikz[x=1em,y=1em,baseline=-0.3em]\fill[ciAzulTitulo] (0,-0.07) rectangle (0.58,0.07) (0.5,-0.24) -- (0.98,0) -- (0.5,0.24) -- cycle;\hspace{0.45em}}
+
+% rótulo em negrito (ex.: "Prompt normal:")
+\newcommand{\ciRotulo}[1]{\par\vspace{15\ci@unit}%
+  {\bfseries\ci@fs{14}{17} #1\par}\vspace{15\ci@unit}}
+
+% citação com seta azul e texto em itálico, recuada
+\newcommand{\ciCitacao}[1]{%
+  {\leftskip=0.05\paperwidth \rightskip=0.1\paperwidth plus 4em \parindent=0pt
+   \hyphenpenalty=10000 \exhyphenpenalty=10000
+   \ci@fs{12}{16.3}\noindent\ciSeta\textit{#1}\par}}
+
+%% ------------------------------------------------------------ listas
+\newcommand{\ci@dot}{\raisebox{0pt}[0pt][0pt]{\tikz[baseline=-0.55ex]\fill[ciLaranja] (0,0) circle (0.0151\paperwidth);}}
+\newcommand{\ci@dotsmall}{\tikz[baseline=-0.55ex]\fill[ciLaranja] (0,0) circle (0.0045\paperwidth);}
+\setbeamertemplate{itemize item}{\ci@dotsmall}
+\setbeamertemplate{itemize subitem}{\ci@dotsmall}
+
+% lista com bolinhas laranja grandes; no layout "imagem" a coluna é estreita
+\newenvironment{ciLista}{%
+  \par
+  \ifdefstring{\ci@layout}{imagem}{\def\ci@listright{0.454\paperwidth}}{\def\ci@listright{0.10\paperwidth}}%
+  \begin{list}{\ci@dot}{%
+    \setlength{\leftmargin}{0.0412\paperwidth}%
+    \setlength{\labelwidth}{0.0302\paperwidth}%
+    \setlength{\labelsep}{0.0110\paperwidth}%
+    \setlength{\rightmargin}{\ci@listright}%
+    \setlength{\itemsep}{15.3\ci@unit}%
+    \setlength{\topsep}{0pt}\setlength{\parsep}{0pt}%
+    \setlength{\parskip}{0pt}\setlength{\itemindent}{0pt}%
+    \setlength{\partopsep}{0pt}\setlength{\listparindent}{0pt}}%
+  \hyphenpenalty=10000 \ci@fs{11}{15.3}}{\end{list}}
+
+%% ------------------------------------------- caixa de destaque (pílula)
+% \ciDestaque[posição vertical, fração da altura]{Título}{Texto}
+\newcommand{\ciDestaque}[3][0.722]{%
+  \begin{tikzpicture}[remember picture,overlay]
+    \shade[left color=ciCaixaA,right color=ciCaixaB,
+           rounded corners=0.0594\paperwidth]
+      ($(current page.north west)+(0.0742\paperwidth,-#1\paperheight)$)
+      rectangle ++(0.599\paperwidth,-0.1188\paperwidth);
+    \node[anchor=west,inner sep=0pt,text width=0.48\paperwidth,align=left]
+      at ($(current page.north west)+(0.125\paperwidth,-#1\paperheight-0.0594\paperwidth)$)
+      {{\bfseries\ci@fs{12}{15} #2\par}\vspace{3\ci@unit}%
+       {\ci@fs{10}{13} #3\par}};
+  \end{tikzpicture}}
+
+%% ---------------------------------------------- helpers de posicionamento
+% \ci@node{âncora}{ponto da página}{dx}{dy}{conteúdo}
+\newcommand{\ci@node}[5]{%
+  \node[anchor=#1,inner sep=0pt,outer sep=0pt]
+    at ($(current page.#2)+(#3,#4)$) {#5};}
+% \ci@img{âncora}{ponto da página}{dx}{dy}{opções}{arquivo}
+\newcommand{\ci@img}[6]{%
+  \ci@node{#1}{#2}{#3}{#4}{\includegraphics[#5]{\ciPastaAssets#6}}}
+
+% logos
+\newcommand{\ci@logos@topdir}{%
+  \ci@img{north east}{north east}{-0.0405\paperwidth}{-0.0464\paperheight}%
+    {width=0.2074\paperwidth}{logo-cissa-cesar.png}}
+\newcommand{\ci@logos@topesq}{%
+  \ci@img{north west}{north west}{0.0515\paperwidth}{-0.049\paperheight}%
+    {width=0.208\paperwidth}{logo-cissa-cesar.png}}
+\newcommand{\ci@logos@apoio}{%
+  \ci@img{north east}{north east}{-0.0316\paperwidth}{-0.8864\paperheight}%
+    {width=0.206\paperwidth}{logo-apoio.png}}
+
+%% ----------------------------------------------------- fundos por layout
+\newcommand{\ci@bg@conteudo}{%
+  \ci@img{south east}{south east}{0pt}{0pt}%
+    {width=0.241\paperwidth,height=0.212\paperwidth}{deco-canto.png}%
+  \ci@logos@topdir \ci@logos@apoio}
+
+\newcommand{\ci@bg@secao}{%
+  \ci@img{south east}{south east}{0pt}{0pt}%
+    {width=0.241\paperwidth,height=0.212\paperwidth}{deco-canto.png}%
+  \ci@logos@topesq \ci@logos@apoio}
+
+\newcommand{\ci@bg@imagem}{%
+  \begin{scope}
+    \clip ($(current page.north west)+(0.945\paperwidth,-0.281\paperwidth)$)
+      circle (0.295\paperwidth);
+    \ci@img{center}{north west}{0.945\paperwidth}{-0.281\paperwidth}%
+      {width=0.59\paperwidth}{\ciImagemLateral}
+  \end{scope}
+  \ci@img{south west}{south west}{0.672\paperwidth}{0pt}%
+    {width=0.153\paperwidth}{deco-quarto.png}%
+  \ci@img{south west}{south west}{0.594\paperwidth}{0pt}%
+    {width=0.078\paperwidth}{deco-canto.png}%
+  \ci@logos@topdir \ci@logos@apoio}
+
+\newcommand{\ci@bg@capa}{%
+  \ci@img{north east}{north east}{0pt}{0pt}%
+    {width=0.337\paperwidth}{deco-capa.png}%
+  \ci@img{north west}{north west}{0.0666\paperwidth}{-0.0916\paperheight}%
+    {width=0.294\paperwidth}{logo-cissa-cesar.png}%
+  \ci@img{north west}{north west}{0.079\paperwidth}{-0.827\paperheight}%
+    {width=0.2438\paperwidth}{logo-apoio.png}}
+
+\newcommand{\ci@bg@fim}{%
+  \ci@img{center}{center}{0pt}{0pt}%
+    {width=\paperwidth,height=\paperheight}{fundo-fim.png}%
+  \ci@img{north east}{north east}{0pt}{0pt}%
+    {width=0.2995\paperwidth,height=0.6166\paperheight}{deco-canto-fim.png}%
+  \ci@img{center}{north west}{0.7795\paperwidth}{-0.698\paperheight}%
+    {width=0.320\paperwidth}{deco-circulo.png}%
+  \ci@img{north west}{north west}{0.0687\paperwidth}{-0.712\paperheight}%
+    {width=0.3194\paperwidth}{logo-cissa-cesar.png}%
+  \ci@img{north west}{north west}{0.0721\paperwidth}{-0.873\paperheight}%
+    {width=0.2452\paperwidth}{logo-apoio.png}}
+
+\setbeamertemplate{background}{%
+  \begin{tikzpicture}[remember picture,overlay]
+    \csname ci@bg@\ci@layout\endcsname
+  \end{tikzpicture}}
+
+%% ----------------------------------------------------- títulos por layout
+\newcommand{\ci@titlefont}{\bfseries\ci@fs{28}{27}}
+
+\newcommand{\ci@ft@conteudo}{%
+  \nointerlineskip
+  \begin{tikzpicture}[remember picture,overlay]
+    \node[anchor=north west,inner sep=0pt,text width=0.64\paperwidth,
+          align=left,text=ciAzulTitulo]
+      at ($(current page.north west)+(0.0824\paperwidth,-0.085\paperheight)$)
+      {\ci@titlefont\insertframetitle};
+  \end{tikzpicture}%
+  \vskip 0.226\paperheight}
+
+\newcommand{\ci@ft@imagem}{%
+  \nointerlineskip
+  \begin{tikzpicture}[remember picture,overlay]
+    \node[anchor=north west,inner sep=0pt,text width=0.46\paperwidth,
+          align=left,text=white]
+      at ($(current page.north west)+(0.0795\paperwidth,-0.152\paperheight)$)
+      {\ci@titlefont\insertframetitle};
+  \end{tikzpicture}%
+  \vskip 0.320\paperheight}
+
+\newcommand{\ci@ft@secao}{%
+  \nointerlineskip
+  \begin{tikzpicture}[remember picture,overlay]
+    \node[anchor=north,inner sep=0pt,text width=0.84\paperwidth,
+          align=center,text=white]
+      at ($(current page.north)+(0pt,-0.163\paperheight)$)
+      {\ci@titlefont\insertframetitle};
+  \end{tikzpicture}%
+  \vskip 0.285\paperheight}
+
+\setbeamertemplate{frametitle}{\csname ci@ft@\ci@layout\endcsname}
+
+%% ------------------------------------------------- slides completos
+% \ciCapa{Título}{Subtítulo}
+\newcommand{\ciCapa}[2]{%
+  \cilayout{capa}%
+  \begin{frame}[plain]
+    \begin{tikzpicture}[remember picture,overlay]
+      \node[anchor=north west,inner sep=0pt,text width=0.60\paperwidth,align=left]
+        at ($(current page.north west)+(0.0639\paperwidth,-0.330\paperheight)$)
+        {{\ci@black\ci@fs{29}{28.7} #1\par}\vspace{0.016\paperwidth}%
+         {\bfseries\color{ciAzulTitulo}\ci@fs{18}{20} #2\par}};
+    \end{tikzpicture}
+    \mbox{}
+  \end{frame}}
+
+% \ciFim{Obrigado!}
+\newcommand{\ciFim}[1]{%
+  \cilayout{fim}%
+  \begin{frame}[plain]
+    \begin{tikzpicture}[remember picture,overlay]
+      \node[anchor=north west,inner sep=0pt,text width=0.6\paperwidth,align=left]
+        at ($(current page.north west)+(0.0804\paperwidth,-0.176\paperheight)$)
+        {\ci@titlefont #1};
+    \end{tikzpicture}
+    \mbox{}
+  \end{frame}}
+
+\endinput
