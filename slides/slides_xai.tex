@@ -11,7 +11,7 @@
 \usepackage{adjustbox}
 \usepackage{amsmath}
 \usepackage{array}
-\graphicspath{{../figs/}{../figs/bar_global/}}
+\graphicspath{{../figs/}{../figs/bar_global/}{../figs/bar_global_benign/}}
 
 % posiciona qualquer conteúdo em coordenadas absolutas (fração da página, a partir do canto superior esquerdo)
 \newcommand{\figat}[4][north west]{%
@@ -71,9 +71,8 @@
   \vspace{8pt}
   \ciAzul{Por que importa:} mede se a explicação é \textbf{interpretável}. A intuição humana é que, se o classificador bloqueou, o que pesou na decisão deve ser a injeção.\par
   \vspace{8pt}
-  \ciAzul{Como ler:} perto de \textbf{1,0}, a atenção da explicação se concentra na injeção; perto de \textbf{0,5}, é como se os tokens fossem escolhidos ao acaso.\par
-  \vspace{8pt}
-  \ciLaranja{Limitação da métrica:} os tokens importantes \textbf{não estão espalhados ao acaso} pela injeção, estão \textbf{concentrados no prefixo} (ex.: \texttt{Ignore previous instructions.}). Como a média considera a injeção inteira, o valor fica perto de 0,6 mesmo quando a explicação localiza o ataque corretamente.\par}
+  \ciAzul{Como ler:} perto de \textbf{1,0}, a atenção da explicação se concentra praticamente em todos os tokens da injeção; perto de \textbf{0,5}, é como se os tokens fossem escolhidos. \textbf{Mas}, pode ser que os tokes mais importantes estejam concentrados em poucos do tokens da injeção. Isso não iria caracterizar uma explicação aleatório, o que é um \textbf{problema} a ser ajeitado na métrica \par
+  \vspace{8pt}}
 \end{frame}
 
 % ============================================================ 3. RESULTADOS GERAIS
@@ -145,14 +144,14 @@
 
 % ============================================================ 4. VOCABULÁRIO DE INJEÇÃO
 \begin{frame}{Vocabulário de injeção}
-  \figat{0.0824}{0.215}{\parbox{0.84\paperwidth}{\color{white}\cifs{11}{14}\ciAzul{As palavras que o Prompt Guard mais relaciona a injeção/jailbreak} (Exemplo: squad\_v2, $|$SHAP$|$ médio por palavra)}}
+  \figat{0.0824}{0.215}{\parbox{0.84\paperwidth}{\color{white}\cifs{11}{14}\ciAzul{As palavras que o Prompt Guard mais relaciona a injeção/jailbreak} (Exemplo no dataset squad\_v2, $|$SHAP$|$ médio por palavra)}}
   \figat{0.0824}{0.36}{\barras{squad_v2_ignore}{0.40}{0.47}}
   \figat{0.5000}{0.36}{\barras{squad_v2_completion}{0.40}{0.47}}
   \figat{0.0824}{0.835}{\legenda{\textbf{Ignore}: \texttt{Ignore}, \texttt{previous}, \texttt{instructions}}}
   \figat{0.5000}{0.835}{\legenda{\textbf{Completion}: \texttt{Answer:} domina}}
 \end{frame}
 
-\begin{frame}{Mapa de saliência}
+\begin{frame}{Mapa de saliência: Ignore}
   \figat{0.0824}{0.24}{\includegraphics[width=0.52\paperwidth]{image.png}}
   \figat{0.64}{0.28}{\parbox{0.28\paperwidth}{\color{white}\cifs{12}{16}%
     Ataque \texttt{ignore}, squad\_v2, amostra 0.\\[6pt]
@@ -161,44 +160,104 @@
 \end{frame}
 
 \begin{frame}{Prefixos e palavras-chave}
+  \ciCitacao{Média da atribuição por palavra nos ataques \texttt{ignore} e \texttt{completion}, nos datasets curtos (squad\_v2 e os três Dolly), sobre as amostras bloqueadas.}
+  \vspace{12pt}
   \begin{ciLista}
     \item \textbf{Ignore:} \texttt{Ignore} 0,46 + \texttt{previous} 0,16 + \texttt{instructions.} 0,18 $\approx$ \textbf{0,80} da probabilidade, em 3 palavras
     \item \textbf{Completion:} \texttt{Answer:} sozinho vale \textbf{0,63}; ``task complete.'' quase nada (0,06)
-    \item \textbf{Classe prevista segue o gatilho:} \texttt{ignore}/\texttt{combined} $\to$ JAILBREAK (99\%); \texttt{completion} $\to$ INJECTION (85\%)
-    \item O texto injetado depois do gatilho pesa pouco; \textbf{URLs de phishing têm atribuição negativa} (média $-0{,}012$)
+    \item O texto injetado depois do gatilho pesa pouco; \textbf{O Prompt Guard concentra toda sua atenção no prefixo e atribuí atenção reduzida ao resto dos tokens}
   \end{ciLista}
 \end{frame}
 
 \begin{frame}{Sem prefixo: direct}
   \figat{0.0824}{0.30}{\barras{squad_v2_direct}{0.40}{0.47}}
+  \figat{0.0824}{0.76}{\legenda{Dataset: \textbf{squad\_v2}, ataque \texttt{direct}. $|$SHAP$|$ médio por palavra (amostras bloqueadas).}}
   \figat{0.54}{0.30}{\parbox{0.38\paperwidth}{\color{white}\cifs{12}{16}%
     Sem gatilho fixo, o modelo reage a \textbf{verbos no imperativo dirigidos ao assistente} que desviam a saída:\\[6pt]
-    \ciLaranja{\texttt{imitate, emulate, simulate, insert, add, append, respond, reply}}\\[6pt]
-    Palavras do cenário (\texttt{notification}, \texttt{alert}, \texttt{subscription}) empurram para benigno.}}
+    \ciLaranja{\texttt{imitate, emulate, simulate, insert, add, append, respond, reply}}\\[6pt]}}
+\end{frame}
+
+\begin{frame}{Mapa de saliência: direct}
+  \figat{0.0824}{0.215}{\includegraphics[width=0.70\paperwidth]{saliency_direct_dolly_summarization_sample183.png}}
+  \figat{0.0824}{0.72}{\parbox{0.60\paperwidth}{\color{white}\cifs{11}{15}%
+    \texttt{direct}, dolly\_summarization, amostra 183 (P(malign) = 0,74). Sem prefixo, a atribuição é \ciAzul{mais distribuída} entre os tokens. Mesmo assim, o modelo consegue captar verbos no imperativo (\texttt{simulate} 0,29), que fogem do contexto original e se referem a um comando na saída do modelo}}
+\end{frame}
+
+\begin{frame}{Mapa de saliência: direct}
+  \figat{0.0824}{0.215}{\includegraphics[width=0.68\paperwidth]{saliency_direct_dolly_closed_qa_22.png}}
+  \figat{0.0824}{0.755}{\parbox{0.60\paperwidth}{\color{white}\cifs{11}{15}%
+    \texttt{direct}, dolly\_closed\_qa, amostra 22 (P(malign) = 0,89). Modelo captura o verbo no imperativo \texttt{reply} (0,33), que é a instrução para controlar a saída do modelo.}}
+\end{frame}
+
+\begin{frame}{Mapa de saliência: direct}
+  \figat{0.0824}{0.215}{\adjustbox{trim=0 {0.08\height} 0 0,clip,width=0.68\paperwidth}{\includegraphics{saliency_direct_dolly_summarization_175.png}}}
+  \figat{0.0824}{0.73}{\parbox{0.60\paperwidth}{\color{white}\cifs{11}{15}%
+    \texttt{direct}, dolly\_summarization, amostra 175 (P(malign) = 0,88). Modelo captura o verbo no imperativo \texttt{output} (0,26), que é a instrução para trocar a resposta por um falso erro de sistema.}}
 \end{frame}
 
 \begin{frame}{Categorias (direct)}
   \vspace{-14pt}\begin{adjustbox}{center,max width=0.72\paperwidth}
   \fontsize{7.8}{10}\selectfont
-  \begin{tabular}{>{\raggedright\arraybackslash}p{0.17\paperwidth}>{\raggedright\arraybackslash}p{0.15\paperwidth}>{\raggedright\arraybackslash}p{0.40\paperwidth}}
+  \begin{tabular}{>{\raggedright\arraybackslash}p{0.17\paperwidth}cc>{\raggedright\arraybackslash}p{0.38\paperwidth}}
   \toprule
-  \textbf{Categoria} & \textbf{Bloqueado (squad / closed\_qa)} & \textbf{Como e por que} \\
+   & \multicolumn{2}{c}{\textbf{Bloqueados (de 50)}} & \\
+  \cmidrule(lr){2-3}
+  \textbf{Categoria} & \textbf{squad\_v2} & \textbf{dolly\_closed\_qa} & \textbf{Como e por que} \\
   \midrule
-  infrastructure\_failure & 41/50 \quad 47/50 & imita mensagem de sistema e usa comandos (\texttt{emulate}, \texttt{halt}, \texttt{terminate}): é a mais bloqueada em 7 de 8 datasets \\[3pt]
-  access\_denial & 29/50 \quad 33/50 & comandos explícitos (\texttt{insert}, \texttt{terminate}), mas em tom de aviso ao usuário \\[3pt]
-  content\_promotion & 30/50 \quad 36/50 & elogio a marcas; bloqueia por verbos como \texttt{integrate}/\texttt{incorporate}, não pelo tema \\[3pt]
-  phishing\_injection & 34/50 \quad 22/50 & recomendação fluente com link; a URL não contribui, o bloqueio depende do verbo de abertura \\
+  infrastructure\_failure & 41 & 47 & imita mensagem de sistema e usa comandos (\texttt{emulate}, \texttt{halt}, \texttt{terminate}): é a mais bloqueada em 7 de 8 datasets \\ \addlinespace[10pt]
+  access\_denial & 29 & 33 & comandos explícitos (\texttt{insert}, \texttt{terminate}), mas em tom de aviso ao usuário \\ \addlinespace[10pt]
+  content\_promotion & 30 & 36 & elogio a marcas; bloqueia por verbos como \texttt{integrate}/\texttt{incorporate}, não pelo tema \\ \addlinespace[10pt]
+  phishing\_injection & 34 & 22 & recomendação fluente com link; a URL não contribui, o bloqueio depende do verbo de abertura \\
   \bottomrule
   \end{tabular}
   \end{adjustbox}
 \end{frame}
 
 % ============================================================ 5. RESULTADOS
+\begin{frame}{Prompts fora da curva}
+  \figat{0.0824}{0.215}{\adjustbox{trim=0 {0.33\height} 0 0,clip,width=0.80\paperwidth}{\includegraphics{saliency_openai_vs_ignore.png}}}
+  \figat{0.0824}{0.645}{\parbox{0.66\paperwidth}{\color{white}\cifs{11}{15}%
+    \ciAzul{Exemplo (ignore, dolly\_closed\_qa, amostra 1):} \texttt{OpenAI's} pesa 0,106 e \texttt{Ignore} só 0,011, mesmo com P(malign) $\approx$ 1. O contexto tem 1363 palavras e fala de \textit{instruction tuning}.\\[4pt]
+    O tamanho do contexto pode estar reduzindo a atenção do modelo às instruções de injeção.}}
+\end{frame}
+
+\begin{frame}{Prompts fora da curva}
+  \figat{0.0824}{0.215}{\barras{benign_squad_v2_ignore}{0.38}{0.52}}
+  \figat{0.5000}{0.215}{\barras{squad_v2_ignore}{0.38}{0.52}}
+  \figat{0.0824}{0.64}{\legenda{Tokens da classe \textbf{benign}: máx. $+0{,}05$}}
+  \figat{0.5000}{0.64}{\legenda{Tokens da classe \textbf{malign}: máx. $+0{,}48$}}
+  \figat{0.0824}{0.73}{\parbox{0.62\paperwidth}{\color{white}\cifs{11}{15}%
+    Tokens que empurram para benigno têm força quase nula frente aos de malign. Para entender melhor, seria útil \ciAzul{explicar também as amostras não bloqueadas} pelo guardrail.}}
+\end{frame}
+
 \begin{frame}{Perguntas de pesquisa}
   \ciRotulo{RQ1 --- os tokens mais importantes coincidem com o injected task?}
-  {\cifs{12}{16}\hspace{0.03\paperwidth}\ciAzul{Sim, nos prefixos:} o top-1 está no span em 93--100\% dos casos (ignore/completion/combined). O percentil médio ($\approx$0,6) é diluído: prefixo 0,99, resto do payload 0,54.\par}
+  {\cifs{11}{14.5}\hspace{0.03\paperwidth}\ciAzul{Sim, mas a atenção não está distribuída:} o token mais importante cai dentro da injeção em 83--100\% das amostras com prefixo e concentra a maior parte da atribuição. Em \texttt{ignore} (datasets curtos), 3 palavras do prefixo somam $\approx$ 0,80 da probabilidade; o resto da injeção fica no nível de qualquer outra palavra.\par}
   \ciRotulo{RQ2 --- as explicações são fiéis ao reduzir aos tokens mais importantes?}
-  {\cifs{12}{16}\hspace{0.03\paperwidth}\ciAzul{Depende do ataque:} Fidelity $\approx$ 0 e acc@1 $\approx$ 1 em ignore/combined; Fidelity 0,3--0,9 e acc@1 0,06--0,68 em direct, onde a decisão depende de vários verbos.\par}
+  {\cifs{11}{14.5}\hspace{0.03\paperwidth}\ciAzul{Depende do dataset e do ataque} (Fidelity, $t{=}0{,}5$; menor é melhor):\par}
+  \vspace{4pt}
+  \begin{adjustbox}{center}
+  \fontsize{8.5}{11}\selectfont
+  \begin{tabular}{llcc}
+  \toprule
+  \textbf{Dataset} & \textbf{Ataque} & \textbf{Fidelity} & \textbf{acc@1} \\
+  \midrule
+  squad\_v2 & ignore & 0,00003 & 1,00 \\
+  multi\_news\_long & ignore & 0,20 & 0,77 \\
+  squad\_v2 & direct & 0,28 & 0,68 \\
+  multi\_news\_long & direct & 0,42 & 0,56 \\
+  \bottomrule
+  \end{tabular}
+  \end{adjustbox}
+\end{frame}
+
+\begin{frame}{Resumo dos resultados}
+  \begin{ciLista}
+    \item O Prompt Guard é \textbf{excelente em pegar prefixos} como \texttt{Ignore previous instructions.} e \texttt{Answer:}
+    \item \textbf{Sem prefixo}, ele foca em \textbf{verbos de injeção fora do contexto do prompt} (\texttt{insert}, \texttt{add}, \texttt{simulate}, \texttt{imitate})
+    \item O \textbf{vocabulário de injeção} mostra as palavras mais capturadas como malign em cada ataque. \textbf{Uma ideia seria o motor de ataque utilizar esse vocabulário para aumentar a eficácia do ataque}
+    \item \textbf{Contextos longos} podem estar influenciando a atenção do modelo e dificultando a captura das instruções de injeção. Isso pode explicar por que datasets como o \texttt{gov\_report} têm taxa de bloqueio menor (7\% com \texttt{ignore})
+  \end{ciLista}
 \end{frame}
 
 % ============================================================ 6. LIMITAÇÕES
@@ -217,7 +276,7 @@
     \item Escala: clone do defensor para o motor de XAI explicar enquanto o defensor em produção segue classificando
     \item O motor de ataque usar a resposta do XAI para melhorar o ataque
     \item Novas métricas de XAI de artigos estado-da-arte
-    \item SyntaxSHAP contra PAIR, TAP, GCG (nanogcg) e ofuscações (combined, ignore)
+    \item SyntaxSHAP contra PAIR, TAP, GCG (nanogcg)
     \item Outras defesas: PISanitizer, DataSentinel, PromptArmor, AttentionTracker, DataFilter, SecAlign, PromptLocate
     \item Comparar com LIME, Partition SHAP, FeatureAblation e SampleShapley
     \item Benchmarks de agentes: AgentDojo e InjecAgent
