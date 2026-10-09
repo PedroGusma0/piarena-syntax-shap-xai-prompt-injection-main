@@ -498,6 +498,7 @@ class ClassifierKernelExplainer:
             "base_value": base_value,
             "full_value": full_value,
             "p_malign": p_malign,
+            "p_benign": 1.0 - p_malign,
             "predicted_label": predicted_label,
             "backend": self.backend,
             # Cost telemetry (e.g. for W&B logging in main.py) — the

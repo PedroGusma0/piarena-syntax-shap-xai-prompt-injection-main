@@ -32,3 +32,13 @@ Both coexist in the same `XAI_REGISTRY` and share the identical `xai_result` out
 ## Analysis Tooling
 
 `scripts/xai_metrics.py` computes faithfulness metrics (Fidelity(t), acc@1, rank of the injected span) from a `--xai` result file, and renders `shap`-library saliency maps (`shap.plots.text`/`shap.plots.bar`). It infers which method produced a given result file from its filename (`--xai-method auto`, the default) — see [SyntaxSHAP](syntaxshap.md)/`plans/xai-syntaxshap-promptguard.md` and [Kernel SHAP](kernelshap.md)/`plans/xai-kernelshap-promptguard.md` for the full design of each.
+
+## `--attack none` (benign-only run)
+
+With `--attack none` every prompt is benign, so the XAI phase explains **all** samples (blocked and not blocked), not only the ones the defense blocked. `scripts/xai_metrics.py` then:
+
+- skips the injected-span alignment metric (nothing was injected);
+- writes a confusion matrix with **positive = benign** (not blocked = TP, blocked = FN; TN/FP are always 0) to `_metrics.json`, `_report.md` and `plots/<stem>/confusion_matrix.png`;
+- labels each saliency map BLOQUEADO / NÃO BLOQUEADO with P(benign) and P(malign). The explained target is still only P(malign); P(benign) = 1 − P(malign).
+
+Results go in the same `--name` folder as the other attacks (`...-none-promptguard-kernelshap-42.json`).

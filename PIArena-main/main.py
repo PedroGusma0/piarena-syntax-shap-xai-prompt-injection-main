@@ -282,8 +282,12 @@ def main(args):
         xai_phase_s = None  # captured here (not re-derived from phase_t0 later —
                              # phase_t0 gets reused/reset by the Evaluation phase
                              # right below) so the W&B per-sample log can report it.
+        # With `--attack none` every prompt is benign, so the XAI phase runs on
+        # all samples (blocked = false positive, not blocked = true negative
+        # for the explained decision) instead of only the blocked ones.
+        no_attack = attack_name == "none"
         if xai is not None:
-            if defense_result.get("detect_flag"):
+            if defense_result.get("detect_flag") or no_attack:
                 phase_t0 = time.time()
                 print(f"[{idx+1}/{len(dataset)}] XAI phase ({args.xai})... "
                       "this can take from seconds to hours depending on the sample "
@@ -306,7 +310,9 @@ def main(args):
                         result_dp["xai_result"] = xai.explain(
                             target_inst=target_inst,
                             context=injected_context,
-                            injected_task=injected_task,
+                            # No injection was inserted with --attack none, so
+                            # there is no span to localize (avoids a spurious one).
+                            injected_task=None if no_attack else injected_task,
                             # `attack_name` (local var), not `args.attack` — when
                             # --attack_path loads a cached attack result, attack_name
                             # is derived from the cache file, and args.attack can be
