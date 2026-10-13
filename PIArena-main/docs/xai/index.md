@@ -42,3 +42,12 @@ With `--attack none` every prompt is benign, so the XAI phase explains **all** s
 - labels each saliency map BLOQUEADO / NÃO BLOQUEADO with P(benign) and P(malign). The explained target is still only P(malign); P(benign) = 1 − P(malign).
 
 Results go in the same `--name` folder as the other attacks (`...-none-promptguard-kernelshap-42.json`).
+
+## NotInject (over-defense) standalone run
+
+[`scripts/run_notinject_xai.py`](../../scripts/run_notinject_xai.py) explains PromptGuard on the three NotInject subsets from [PIGuard](https://github.com/leolee99/PIGuard) (`datasets/NotInject_{one,two,three}.json`, 113 benign prompts each, one/two/three prompt-injection trigger words) without `main.py`: no attack, no victim LLM, no evaluator. It is the `--attack none` procedure above (every prompt explained), writing `main.py`-compatible results (`results/evaluation_results/<name>/notinject_<subset>-novictim-none-promptguard-kernelshap-<seed>.json`, resumable) and then running `scripts/xai_metrics.py` and `scripts/xai_shap_plots_test.py` on each. `word_list` (the trigger words) and `category` are kept in each sample for later analysis.
+
+```bash
+python scripts/run_notinject_xai.py --subsets one --limit 5 --name notinject_smoke   # smoke test
+python scripts/run_notinject_xai.py                                                  # all 3 subsets
+```

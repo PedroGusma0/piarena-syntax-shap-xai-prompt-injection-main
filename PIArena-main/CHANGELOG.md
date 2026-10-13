@@ -6,6 +6,7 @@ This project does not currently use tagged releases consistently, so this change
 
 ### Added
 
+- Added [`scripts/run_notinject_xai.py`](scripts/run_notinject_xai.py), a standalone (no `main.py`/victim LLM/evaluator) Kernel SHAP explanation of `promptguard` over the NotInject over-defense subsets from PIGuard; writes `main.py`-compatible results so `scripts/xai_metrics.py` and the plot scripts run unchanged. See [`docs/xai/index.md`](docs/xai/index.md).
 - Added root-level guidance in [`AGENTS.md`](AGENTS.md) and [`CLAUDE.md`](CLAUDE.md) requiring implementation plans to be written under `plans/`.
 - Added root docs trees for supported attacks and defenses under [`docs/attacks/`](docs/attacks/) and [`docs/defenses/`](docs/defenses/).
 - Added a compact public docs page at [`docs/extending.md`](docs/extending.md) covering how to add new attacks and defenses.

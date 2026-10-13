@@ -1,15 +1,17 @@
 note: "version 2" Tectonic command-line interface activated
 note: Running TeX ...
-warning: slides_xai.tex:160: Underfull \hbox (badness 1478) in paragraph at lines 160--160
-warning: slides_xai.tex:160: Underfull \hbox (badness 10000) in paragraph at lines 160--160
-warning: slides_xai.tex:178: Underfull \hbox (badness 10000) in paragraph at lines 178--178
-warning: slides_xai.tex:178: Underfull \hbox (badness 10000) in paragraph at lines 178--178
-note: Rerunning TeX because "slides_xai.nav" changed ...
-warning: slides_xai.tex:160: Underfull \hbox (badness 1478) in paragraph at lines 160--160
-warning: slides_xai.tex:160: Underfull \hbox (badness 10000) in paragraph at lines 160--160
-warning: slides_xai.tex:178: Underfull \hbox (badness 10000) in paragraph at lines 178--178
-warning: slides_xai.tex:178: Underfull \hbox (badness 10000) in paragraph at lines 178--178
+warning: slides_xai.tex:43: Underfull \hbox (badness 10000) in paragraph at lines 43--43
+warning: slides_xai.tex:163: Underfull \hbox (badness 1478) in paragraph at lines 163--163
+warning: slides_xai.tex:163: Underfull \hbox (badness 10000) in paragraph at lines 163--163
+warning: slides_xai.tex:171: Underfull \hbox (badness 10000) in paragraph at lines 171--171
+warning: slides_xai.tex:171: Underfull \hbox (badness 10000) in paragraph at lines 171--171
+note: Rerunning TeX because "slides_xai.aux" changed ...
+warning: slides_xai.tex:43: Underfull \hbox (badness 10000) in paragraph at lines 43--43
+warning: slides_xai.tex:163: Underfull \hbox (badness 1478) in paragraph at lines 163--163
+warning: slides_xai.tex:163: Underfull \hbox (badness 10000) in paragraph at lines 163--163
+warning: slides_xai.tex:171: Underfull \hbox (badness 10000) in paragraph at lines 171--171
+warning: slides_xai.tex:171: Underfull \hbox (badness 10000) in paragraph at lines 171--171
 warning: warnings were issued by the TeX engine; use --print and/or --keep-logs for details.
 note: Running xdvipdfmx ...
-note: Writing `slides_xai.pdf` (2.5457143783569336 MiB)
+note: Writing `slides_xai.pdf` (2.435868263244629 MiB)
 note: Skipped writing 5 intermediate files (use --keep-intermediates to keep them)

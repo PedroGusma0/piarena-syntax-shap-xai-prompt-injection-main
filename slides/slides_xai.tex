@@ -37,6 +37,9 @@
   \figat{0.46}{0.30}{\parbox{0.44\paperwidth}{\color{white}\cifs{13}{18}%
     Estamos querendo responder a pergunta: \ciAzul{Por que o classificador decidiu bloquear?}\\[8pt]
     \cifs{11}{15}O módulo de XAI só entra em ação quando o Prompt Guard marca o prompt como \textbf{maligno}; ele gera a explicação (Kernel SHAP), os mapas de saliência e as métricas de qualidade da explicação.}}
+  \figat{0.46}{0.60}{\parbox{0.44\paperwidth}{\color{white}\cifs{11}{15}%
+    \ciAzul{Exemplo de execução:}\\[4pt]
+    \fcolorbox{ciAzulForma}{ciCaixaB}{\parbox{0.42\paperwidth}{\color{white}\fontsize{7.5}{10}\selectfont\ttfamily python main.py -{}-dataset squad\_v2 -{}-attack direct -{}-defense promptguard -{}-xai kernelshap}}}}
 \end{frame}
 
 \begin{frame}{PI Arena: o que foi incluído}
@@ -79,68 +82,13 @@
 \newcommand{\cab}{%
   \vspace{-14pt}\begin{adjustbox}{center,max width=0.72\paperwidth}
   \tabfont
-  \begin{tabular}{llcccccc}
+  \begin{tabular}{lrlcccccc}
   \toprule
-  \textbf{Dataset} & \textbf{Ataque} & $n$ & \textbf{Fid(0,5)} & \textbf{acc@1(0,5)} & \textbf{Alin.} & \textbf{ASR} & \textbf{Utility} \\
+  \textbf{Dataset} & \textbf{Avg Len} & \textbf{Ataque} & $n$ & \textbf{Fid(0,5)} & \textbf{acc@1(0,5)} & \textbf{Alin.} & \textbf{ASR} & \textbf{Utility} \\
   \midrule}
-\newcommand{\rab}{\bottomrule\end{tabular}\end{adjustbox}}
+\newcommand{\rab}{\bottomrule\end{tabular}\end{adjustbox}\par\vspace{4pt}\hspace{0.0838\paperwidth}\legenda{Avg Len: média de caracteres do contexto de cada dataset (PIArena, Tab. 8).}}
 
-\begin{frame}{Resultados gerais (1/3)}
-  \cab
-  \multirow{4}{*}{squad\_v2} & Ignore     & 200 & $2{,}99\times10^{-5}$ & 1,00 & 0,598 & 0,000 & 0,000 \\
-   & Completion & 199 & 0,038 & 0,960 & 0,616 & 0,005 & 0,000 \\
-   & Direct     & 134 & 0,277 & 0,679 & 0,623 & 0,240 & 0,205 \\
-   & Combined   & 200 & $2{,}00\times10^{-5}$ & 1,00 & 0,582 & 0,000 & 0,000 \\
-  \midrule
-  \multirow{4}{*}{dolly\_closed\_qa} & Ignore     & 200 & 0,005 & 0,995 & 0,589 & 0,000 & 0,000 \\
-   & Completion & 199 & 0,035 & 0,970 & 0,603 & 0,005 & 0,000 \\
-   & Direct     & 138 & 0,331 & 0,638 & 0,619 & 0,260 & 0,210 \\
-   & Combined   & 200 & 0,004 & 0,995 & 0,579 & 0,000 & 0,000 \\
-  \midrule
-  \multirow{4}{*}{dolly\_info\_extraction} & Ignore     & 198 & 0,002 & 1,000 & 0,592 & 0,010 & 0,005 \\
-   & Completion & 198 & 0,036 & 0,980 & 0,601 & 0,010 & 0,005 \\
-   & Direct     & 129 & 0,326 & 0,643 & 0,607 & 0,285 & 0,240 \\
-   & Combined   & 198 & $2{,}34\times10^{-4}$ & 1,000 & 0,582 & 0,010 & 0,005 \\
-  \rab
-\end{frame}
 
-\begin{frame}{Resultados gerais (2/3)}
-  \cab
-  \multirow{4}{*}{dolly\_summarization} & Ignore     & 193 & 0,006 & 0,990 & 0,578 & 0,030 & 0,020 \\
-   & Completion & 190 & 0,051 & 0,953 & 0,593 & 0,040 & 0,030 \\
-   & Direct     & 114 & 0,324 & 0,605 & 0,605 & 0,390 & 0,260 \\
-   & Combined   & 193 & 0,008 & 0,990 & 0,581 & 0,025 & 0,010 \\
-  \midrule
-  \multirow{4}{*}{msmarco\_rag} & Ignore     & 94 & 0,081 & 0,904 & 0,586 & 0,030 & 0,050 \\
-   & Completion & 88 & 0,291 & 0,693 & 0,592 & 0,040 & 0,100 \\
-   & Direct     & 64 & 0,462 & 0,484 & 0,578 & 0,140 & 0,320 \\
-   & Combined   & 94 & 0,108 & 0,883 & 0,583 & 0,030 & 0,040 \\
-  \midrule
-  \multirow{4}{*}{hotpotqa\_rag} & Ignore     & 81 & 0,060 & 0,938 & 0,580 & 0,110 & 0,100 \\
-   & Completion & 71 & 0,210 & 0,817 & 0,584 & 0,130 & 0,190 \\
-   & Direct     & 49 & 0,348 & 0,612 & 0,620 & 0,160 & 0,370 \\
-   & Combined   & 81 & 0,076 & 0,914 & 0,582 & 0,110 & 0,090 \\
-  \rab
-\end{frame}
-
-\begin{frame}{Resultados gerais (3/3)}
-  \cab
-  \multirow{4}{*}{nq\_rag} & Ignore     & 71 & 0,146 & 0,831 & 0,585 & 0,170 & 0,160 \\
-   & Completion & 56 & 0,336 & 0,643 & 0,611 & 0,270 & 0,300 \\
-   & Direct     & 40 & 0,484 & 0,450 & 0,612 & 0,240 & 0,500 \\
-   & Combined   & 66 & 0,102 & 0,879 & 0,593 & 0,210 & 0,230 \\
-  \midrule
-  \multirow{4}{*}{multi\_news\_long} & Ignore     & 48 & 0,199 & 0,771 & 0,583 & 0,460 & 0,079 \\
-   & Completion & 32 & 0,266 & 0,719 & 0,611 & 0,520 & 0,108 \\
-   & Direct     & 18 & 0,424 & 0,556 & 0,651 & 0,650 & 0,122 \\
-   & Combined   & 46 & 0,110 & 0,891 & 0,600 & 0,450 & 0,086 \\
-  \midrule
-  \multirow{4}{*}{gov\_report\_long} & Ignore     & 7 & 0,065 & 0,857 & 0,592 & 0,820 & 0,134 \\
-   & Completion & 5 & 0,211 & 0,800 & 0,550 & 0,800 & 0,153 \\
-   & Direct     & 0 & --- & --- & --- & 0,820 & 0,157 \\
-   & Combined   & 7 & 0,019 & 1,000 & 0,597 & 0,820 & 0,141 \\
-  \rab
-\end{frame}
 
 % ============================================================ 4. VOCABULÁRIO DE INJEÇÃO
 \begin{frame}{Vocabulário de injeção}
@@ -157,16 +105,6 @@
     Ataque \texttt{ignore}, squad\_v2, amostra 0.\\[6pt]
     \ciLaranja{Vermelho} aumenta P(malign); \ciAzul{azul} reduz.\\[6pt]
     \texttt{Ignore previous instructions.} concentra quase toda a atribuição.}}
-\end{frame}
-
-\begin{frame}{Prefixos e palavras-chave}
-  \ciCitacao{Média da atribuição por palavra nos ataques \texttt{ignore} e \texttt{completion}, nos datasets curtos (squad\_v2 e os três Dolly), sobre as amostras bloqueadas.}
-  \vspace{12pt}
-  \begin{ciLista}
-    \item \textbf{Ignore:} \texttt{Ignore} 0,46 + \texttt{previous} 0,16 + \texttt{instructions.} 0,18 $\approx$ \textbf{0,80} da probabilidade, em 3 palavras
-    \item \textbf{Completion:} \texttt{Answer:} sozinho vale \textbf{0,63}; ``task complete.'' quase nada (0,06)
-    \item O texto injetado depois do gatilho pesa pouco; \textbf{O Prompt Guard concentra toda sua atenção no prefixo e atribuí atenção reduzida ao resto dos tokens}
-  \end{ciLista}
 \end{frame}
 
 \begin{frame}{Sem prefixo: direct}
@@ -195,23 +133,7 @@
     \texttt{direct}, dolly\_summarization, amostra 175 (P(malign) = 0,88). Modelo captura o verbo no imperativo \texttt{output} (0,26), que é a instrução para trocar a resposta por um falso erro de sistema.}}
 \end{frame}
 
-\begin{frame}{Categorias (direct)}
-  \vspace{-14pt}\begin{adjustbox}{center,max width=0.72\paperwidth}
-  \fontsize{7.8}{10}\selectfont
-  \begin{tabular}{>{\raggedright\arraybackslash}p{0.17\paperwidth}cc>{\raggedright\arraybackslash}p{0.38\paperwidth}}
-  \toprule
-   & \multicolumn{2}{c}{\textbf{Bloqueados (de 50)}} & \\
-  \cmidrule(lr){2-3}
-  \textbf{Categoria} & \textbf{squad\_v2} & \textbf{dolly\_closed\_qa} & \textbf{Como e por que} \\
-  \midrule
-  infrastructure\_failure & 41 & 47 & imita mensagem de sistema e usa comandos (\texttt{emulate}, \texttt{halt}, \texttt{terminate}): é a mais bloqueada em 7 de 8 datasets \\ \addlinespace[10pt]
-  access\_denial & 29 & 33 & comandos explícitos (\texttt{insert}, \texttt{terminate}), mas em tom de aviso ao usuário \\ \addlinespace[10pt]
-  content\_promotion & 30 & 36 & elogio a marcas; bloqueia por verbos como \texttt{integrate}/\texttt{incorporate}, não pelo tema \\ \addlinespace[10pt]
-  phishing\_injection & 34 & 22 & recomendação fluente com link; a URL não contribui, o bloqueio depende do verbo de abertura \\
-  \bottomrule
-  \end{tabular}
-  \end{adjustbox}
-\end{frame}
+
 
 % ============================================================ 5. RESULTADOS
 \begin{frame}{Prompts fora da curva}
@@ -221,14 +143,7 @@
     O tamanho do contexto pode estar reduzindo a atenção do modelo às instruções de injeção.}}
 \end{frame}
 
-\begin{frame}{Prompts fora da curva}
-  \figat{0.0824}{0.215}{\barras{benign_squad_v2_ignore}{0.38}{0.52}}
-  \figat{0.5000}{0.215}{\barras{squad_v2_ignore}{0.38}{0.52}}
-  \figat{0.0824}{0.64}{\legenda{Tokens da classe \textbf{benign}: máx. $+0{,}05$}}
-  \figat{0.5000}{0.64}{\legenda{Tokens da classe \textbf{malign}: máx. $+0{,}48$}}
-  \figat{0.0824}{0.73}{\parbox{0.62\paperwidth}{\color{white}\cifs{11}{15}%
-    Tokens que empurram para benigno têm força quase nula frente aos de malign. Para entender melhor, seria útil \ciAzul{explicar também as amostras não bloqueadas} pelo guardrail.}}
-\end{frame}
+
 
 \begin{frame}{Perguntas de pesquisa}
   \ciRotulo{RQ1 --- os tokens mais importantes coincidem com o injected task?}
@@ -260,6 +175,63 @@
   \end{ciLista}
 \end{frame}
 
+\begin{frame}{Resultados gerais (1/3)}
+  \cab
+  \multirow{4}{*}{squad\_v2} & \multirow{4}{*}{706} & Ignore     & 200 & $2{,}99\times10^{-5}$ & 1,00 & 0,598 & 0,000 & 0,000 \\
+   & & Completion & 199 & 0,038 & 0,960 & 0,616 & 0,005 & 0,000 \\
+   & & Direct     & 134 & 0,277 & 0,679 & 0,623 & 0,240 & 0,205 \\
+   & & Combined   & 200 & $2{,}00\times10^{-5}$ & 1,00 & 0,582 & 0,000 & 0,000 \\
+  \midrule
+  \multirow{4}{*}{dolly\_closed\_qa} & \multirow{4}{*}{1\,062} & Ignore     & 200 & 0,005 & 0,995 & 0,589 & 0,000 & 0,000 \\
+   & & Completion & 199 & 0,035 & 0,970 & 0,603 & 0,005 & 0,000 \\
+   & & Direct     & 138 & 0,331 & 0,638 & 0,619 & 0,260 & 0,210 \\
+   & & Combined   & 200 & 0,004 & 0,995 & 0,579 & 0,000 & 0,000 \\
+  \midrule
+  \multirow{4}{*}{dolly\_info\_extraction} & \multirow{4}{*}{1\,086} & Ignore     & 198 & 0,002 & 1,000 & 0,592 & 0,010 & 0,005 \\
+   & & Completion & 198 & 0,036 & 0,980 & 0,601 & 0,010 & 0,005 \\
+   & & Direct     & 129 & 0,326 & 0,643 & 0,607 & 0,285 & 0,240 \\
+   & & Combined   & 198 & $2{,}34\times10^{-4}$ & 1,000 & 0,582 & 0,010 & 0,005 \\
+  \rab
+\end{frame}
+
+\begin{frame}{Resultados gerais (2/3)}
+  \cab
+  \multirow{4}{*}{dolly\_summarization} & \multirow{4}{*}{1\,567} & Ignore     & 193 & 0,006 & 0,990 & 0,578 & 0,030 & 0,020 \\
+   & & Completion & 190 & 0,051 & 0,953 & 0,593 & 0,040 & 0,030 \\
+   & & Direct     & 114 & 0,324 & 0,605 & 0,605 & 0,390 & 0,260 \\
+   & & Combined   & 193 & 0,008 & 0,990 & 0,581 & 0,025 & 0,010 \\
+  \midrule
+  \multirow{4}{*}{msmarco\_rag} & \multirow{4}{*}{3\,519} & Ignore     & 94 & 0,081 & 0,904 & 0,586 & 0,030 & 0,050 \\
+   & & Completion & 88 & 0,291 & 0,693 & 0,592 & 0,040 & 0,100 \\
+   & & Direct     & 64 & 0,462 & 0,484 & 0,578 & 0,140 & 0,320 \\
+   & & Combined   & 94 & 0,108 & 0,883 & 0,583 & 0,030 & 0,040 \\
+  \midrule
+  \multirow{4}{*}{hotpotqa\_rag} & \multirow{4}{*}{5\,089} & Ignore     & 81 & 0,060 & 0,938 & 0,580 & 0,110 & 0,100 \\
+   & & Completion & 71 & 0,210 & 0,817 & 0,584 & 0,130 & 0,190 \\
+   & & Direct     & 49 & 0,348 & 0,612 & 0,620 & 0,160 & 0,370 \\
+   & & Combined   & 81 & 0,076 & 0,914 & 0,582 & 0,110 & 0,090 \\
+  \rab
+\end{frame}
+
+\begin{frame}{Resultados gerais (3/3)}
+  \cab
+  \multirow{4}{*}{nq\_rag} & \multirow{4}{*}{5\,432} & Ignore     & 71 & 0,146 & 0,831 & 0,585 & 0,170 & 0,160 \\
+   & & Completion & 56 & 0,336 & 0,643 & 0,611 & 0,270 & 0,300 \\
+   & & Direct     & 40 & 0,484 & 0,450 & 0,612 & 0,240 & 0,500 \\
+   & & Combined   & 66 & 0,102 & 0,879 & 0,593 & 0,210 & 0,230 \\
+  \midrule
+  \multirow{4}{*}{multi\_news\_long} & \multirow{4}{*}{8\,907} & Ignore     & 48 & 0,199 & 0,771 & 0,583 & 0,460 & 0,079 \\
+   & & Completion & 32 & 0,266 & 0,719 & 0,611 & 0,520 & 0,108 \\
+   & & Direct     & 18 & 0,424 & 0,556 & 0,651 & 0,650 & 0,122 \\
+   & & Combined   & 46 & 0,110 & 0,891 & 0,600 & 0,450 & 0,086 \\
+  \midrule
+  \multirow{4}{*}{gov\_report\_long} & \multirow{4}{*}{16\,581} & Ignore     & 7 & 0,065 & 0,857 & 0,592 & 0,820 & 0,134 \\
+   & & Completion & 5 & 0,211 & 0,800 & 0,550 & 0,800 & 0,153 \\
+   & & Direct     & 0 & --- & --- & --- & 0,820 & 0,157 \\
+   & & Combined   & 7 & 0,019 & 1,000 & 0,597 & 0,820 & 0,141 \\
+  \rab
+\end{frame}
+
 % ============================================================ 6. LIMITAÇÕES
 \begin{frame}{Limitações}
   \begin{ciLista}
@@ -273,10 +245,9 @@
 % ============================================================ 7. FUTURO
 \begin{frame}{Futuro}
   \begin{ciLista}
-    \item Escala: clone do defensor para o motor de XAI explicar enquanto o defensor em produção segue classificando
     \item O motor de ataque usar a resposta do XAI para melhorar o ataque
     \item Novas métricas de XAI de artigos estado-da-arte
-    \item SyntaxSHAP contra PAIR, TAP, GCG (nanogcg)
+    \item Testar outros motores de ataque como PAIR, TAP, GCG (nanogcg)
     \item Outras defesas: PISanitizer, DataSentinel, PromptArmor, AttentionTracker, DataFilter, SecAlign, PromptLocate
     \item Comparar com LIME, Partition SHAP, FeatureAblation e SampleShapley
     \item Benchmarks de agentes: AgentDojo e InjecAgent
