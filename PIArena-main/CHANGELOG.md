@@ -6,6 +6,10 @@ This project does not currently use tagged releases consistently, so this change
 
 ### Added
 
+- `--xai kernelshap` now explains the classifier of the selected defense (`piarena/xai/classifiers.py`: `promptguard` → Prompt-Guard-86M, `piguard` → `leolee99/PIGuard`, loaded with `trust_remote_code`), so `--defense piguard --xai kernelshap` works; `xai_config.model_name` still overrides. A defense with no known classifier and no `model_name` now raises instead of silently explaining Prompt-Guard.
+- Added the XAI `explain_scope` setting (`auto`|`blocked`|`all`, `BaseXAI.should_explain`) plus `--xai_scope`; the blocked-only / `--attack none` rule moved out of `main.py` (default `auto` keeps the previous behavior). `main.py` now records `defense` and `xai_model` on each explained sample, and saliency maps, bar plots, confusion matrix and report name the explained defense.
+- Added `scripts/xai_compare_datasets.py` (global-token-ranking comparison between result files) and `scripts/run_notinject_xai.py` (`--defense promptguard|piguard`).
+- Added [`scripts/run_notinject_xai.py`](scripts/run_notinject_xai.py), a standalone (no `main.py`/victim LLM/evaluator) Kernel SHAP explanation of `promptguard` over the NotInject over-defense subsets from PIGuard; writes `main.py`-compatible results so `scripts/xai_metrics.py` and the plot scripts run unchanged. See [`docs/xai/index.md`](docs/xai/index.md).
 - Added [`scripts/run_notinject_xai.py`](scripts/run_notinject_xai.py), a standalone (no `main.py`/victim LLM/evaluator) Kernel SHAP explanation of `promptguard` over the NotInject over-defense subsets from PIGuard; writes `main.py`-compatible results so `scripts/xai_metrics.py` and the plot scripts run unchanged. See [`docs/xai/index.md`](docs/xai/index.md).
 - Added root-level guidance in [`AGENTS.md`](AGENTS.md) and [`CLAUDE.md`](CLAUDE.md) requiring implementation plans to be written under `plans/`.
 - Added root docs trees for supported attacks and defenses under [`docs/attacks/`](docs/attacks/) and [`docs/defenses/`](docs/defenses/).
@@ -30,6 +34,8 @@ This project does not currently use tagged releases consistently, so this change
 
 ### Changed
 
+- `scripts/xai_metrics.py`: the confusion matrix is now computed on every run with **positive = malign** (was `--attack none` only, positive = benign; `recall_benign` removed, `recall_malign`/`fpr` added). `--model-name` defaults to `auto` (inferred from the defense). Old `_metrics.json` files keep the old convention until regenerated.
+- Replaced the alignment metric `injected_span_percentile` (mean |SHAP| percentile over the injected span) by `injected_top_mass_precision` (% of the most important tokens, covering a fraction of the total |SHAP|, that lie inside the span; `--alignment-mass`). Also used by `scripts/xai_compare_backends.py` and `scripts/xai_shap_plots_test.py`. Old `_metrics.json` files keep the previous key until regenerated.
 - Merged the `kernelshap` XAI method back into this tree — it was developed in a separate, parallel `piarena_xai_kernel_shap/PIArena-main/` checkout (duplicated at the whole-repo level, sharing everything except `piarena/xai/`) to keep the two experiments from stepping on each other during development. Both methods now coexist in the same `XAI_REGISTRY`/`piarena/xai/`, the same `main.py`, and the same (now unified) `scripts/xai_metrics.py`; the duplicate checkout was removed.
 - Migrated the website to consume markdown directly from root [`docs/`](docs/) instead of maintaining a duplicate `website/docs/` tree.
 - Reorganized public docs into a smaller structure centered on:

@@ -8,16 +8,19 @@ for the actual explanation logic.
 from ..base import BaseXAI, register_xai
 
 
-def _load_classifier(model_name: str, max_length=None):
+def _load_classifier(model_name: str, max_length=None, trust_remote_code: bool = False):
     """Loads the classifier directly (no HF `pipeline()` wrapper) — Kernel
     SHAP via captum needs tensor-in/tensor-out access, not a text-in/text-out
     convenience API. Heavy imports (torch/transformers) are lazy, only
-    reached when an XAI method is actually selected (see `_ensure_explainer`)."""
+    reached when an XAI method is actually selected (see `_ensure_explainer`).
+
+    `trust_remote_code` is needed by classifiers that ship their own model
+    class (e.g. `leolee99/PIGuard`); off by default."""
     import torch
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForSequenceClassification.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=trust_remote_code)
+    model = AutoModelForSequenceClassification.from_pretrained(model_name, trust_remote_code=trust_remote_code)
     model.eval()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
@@ -28,7 +31,13 @@ def _load_classifier(model_name: str, max_length=None):
 class KernelShapXAI(BaseXAI):
     name = "kernelshap"
     DEFAULT_CONFIG = {
+        # Overridden per defense by `main.py` via `piarena.xai.classifiers.resolve_classifier`
+        # (so `--defense piguard` explains PIGuard, not this default).
         "model_name": "meta-llama/Prompt-Guard-86M",
+        "trust_remote_code": False,
+        # Which samples get explained: "auto" (blocked ones; every sample with
+        # `--attack none`) | "blocked" | "all". See `BaseXAI.should_explain`.
+        "explain_scope": "auto",
         "explain_targets": ["context"],
         # Never left at captum's own default (25) — see Risco #3 do plano.
         # "auto" resolves per-call to min(2*M + 2048, max_n_samples).
@@ -57,7 +66,9 @@ class KernelShapXAI(BaseXAI):
             return
         from .classifier_explainer import ClassifierKernelExplainer
 
-        tokenizer, model = _load_classifier(self.config["model_name"], self.config["max_length"])
+        tokenizer, model = _load_classifier(
+            self.config["model_name"], self.config["max_length"], self.config["trust_remote_code"],
+        )
         self._explainer = ClassifierKernelExplainer(
             model,
             tokenizer,

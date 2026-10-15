@@ -11,7 +11,7 @@ The result JSON mimics `main.py`'s evaluation-result format and filename
 convention (`{dataset}-{llm}-{attack}-{defense}-{xai}-{seed}.json`), which is
 all those two scripts depend on:
 
-  results/evaluation_results/<name>/notinject_<subset>-novictim-none-promptguard-kernelshap-<seed>.json
+  results/evaluation_results/<name>/notinject_<subset>-novictim-none-<defense>-kernelshap-<seed>.json
   results/evaluation_results/<name>/xai_metrics/...
 
 Resumable: samples already in the result file are skipped.
@@ -19,6 +19,7 @@ Resumable: samples already in the result file are skipped.
 Usage:
   python scripts/run_notinject_xai.py                       # all 3 subsets
   python scripts/run_notinject_xai.py --subsets one --limit 5 --name notinject_smoke
+  python scripts/run_notinject_xai.py --defense piguard --name kernelshap_notinject_piguard
 """
 import argparse
 import json
@@ -42,7 +43,10 @@ def parse_args():
     p.add_argument("--name", default="kernelshap_notinject")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--limit", type=int, default=None, help="Only the first N prompts of each subset (smoke test).")
-    p.add_argument("--model-name", default="meta-llama/Prompt-Guard-86M")
+    p.add_argument("--defense", default="promptguard", choices=["promptguard", "piguard"],
+                   help="Which defense's classifier to explain (piarena.xai.classifiers).")
+    p.add_argument("--model-name", default=None,
+                   help="Override the classifier of --defense (default: the one piarena.xai.classifiers maps it to).")
     p.add_argument("--xai-backend", default="shap", choices=["shap", "captum"])
     p.add_argument("--n-samples", default="auto", help="'auto' or an integer (Kernel SHAP coalition samples).")
     p.add_argument("--max-length", type=int, default=None)
@@ -66,11 +70,14 @@ def _save_json(obj, path):
 
 
 def _make_xai(args):
+    from piarena.xai.classifiers import resolve_classifier
     from piarena.xai.kernelshap import KernelShapXAI
 
     n_samples = args.n_samples if args.n_samples == "auto" else int(args.n_samples)
+    classifier = resolve_classifier(args.defense, {"model_name": args.model_name} if args.model_name else None)
     return KernelShapXAI({
-        "model_name": args.model_name,
+        **classifier,
+        "explain_scope": "all",  # every NotInject prompt is explained, blocked or not
         "backend": args.xai_backend,
         "n_samples": n_samples,
         "max_length": args.max_length,
@@ -85,7 +92,7 @@ def run_subset(xai, subset, args, out_dir):
     if args.limit is not None:
         data = data[: args.limit]
 
-    result_path = os.path.join(out_dir, f"notinject_{subset}-novictim-none-promptguard-kernelshap-{args.seed}.json")
+    result_path = os.path.join(out_dir, f"notinject_{subset}-novictim-none-{args.defense}-kernelshap-{args.seed}.json")
     result = _load_json(result_path, default={})
 
     for idx, item in enumerate(data):
@@ -99,6 +106,7 @@ def run_subset(xai, subset, args, out_dir):
             "injected_task": "", "target_task_answer": "", "injected_task_answer": "",
             "category": item.get("category"), "word_list": item.get("word_list"),
             "trigger_subset": subset,
+            "defense": args.defense, "xai_model": xai.config["model_name"],
             "utility": None, "asr": None,
         }
         try:
@@ -123,8 +131,9 @@ def run_subset(xai, subset, args, out_dir):
 def run_postprocessing(result_path, args):
     for cmd in (
         [sys.executable, "scripts/xai_metrics.py", "--result", result_path,
-         "--model-name", args.model_name, "--no-wandb"],
-        [sys.executable, "scripts/xai_shap_plots_test.py", "--result", result_path],
+         "--no-wandb"],
+        [sys.executable, "scripts/xai_shap_plots_test.py", "--result", result_path,
+         "--min-count", "1"],  # NotInject trigger words are ~unique per prompt; the default 5 would hide them all
     ):
         print("$", " ".join(cmd), flush=True)
         subprocess.run(cmd, cwd=ROOT, check=True)

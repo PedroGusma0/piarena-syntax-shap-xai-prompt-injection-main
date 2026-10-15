@@ -23,17 +23,18 @@ Fidelity(t)/acc@1, and writes:
                                                               of shap's own value coloring (see
                                                               _mark_injected_span)
   - <out-dir>/plots/<result-stem>/fidelity_acc_bars.png    — mean Fidelity(t)/acc@1(t) per threshold
-  - <out-dir>/plots/<result-stem>/alignment_histogram.png  — distribution of injected_span_percentile
+  - <out-dir>/plots/<result-stem>/alignment_histogram.png  — distribution of injected_top_mass_precision
+  - <out-dir>/plots/<result-stem>/confusion_matrix.png     — positive = malign (predicted malign = blocked); every run
 
 (plots live under a <result-stem> subdirectory, not directly in <out-dir>/plots/,
 so that running this script once per attack against the same --name/out-dir --
 as run_kernelshap_squad_v2_4attacks.sh and run_syntaxshap_squad_v2_4attacks.sh
 do -- doesn't have each attack's plots silently overwrite the previous one's.)
 
-Since `main.py` only runs the XAI phase on samples the defense actually
-blocked (`detect_flag=True`), `per_sample`/the plots only ever cover that
-blocked subset — there is no true-positive/false-negative split to report
-here anymore (that framing was dropped along with running XAI unconditionally).
+`per_sample`/the plots cover the samples the XAI method chose to explain (its
+`explain_scope`: only the blocked ones by default, every sample with `--attack
+none` or `--xai_scope all`). The confusion matrix (positive = malign) is
+computed over the whole raw result.
 The ASR/Utility summary, by contrast, is computed over the *whole* raw result
 (every sample, blocked or not) — it's the benchmark-level context the
 per-sample XAI metrics sit inside.
@@ -69,10 +70,11 @@ import time
 import numpy as np
 
 from piarena.utils import save_json
+from piarena.xai.classifiers import resolve_classifier
 from piarena.xai.metrics import (
     acc_at_1,
     fidelity,
-    injected_span_percentile,
+    injected_top_mass_precision,
 )
 
 _XAI_METHODS = ("syntaxshap", "kernelshap")
@@ -84,7 +86,14 @@ def parse_args():
     p.add_argument("--xai-method", default="auto", choices=["auto", *_XAI_METHODS],
                     help="Which explainer produced --result. 'auto' (default) infers it from the "
                          "filename's -{xai}- suffix (main.py's own naming convention).")
-    p.add_argument("--model-name", default="meta-llama/Prompt-Guard-86M")
+    p.add_argument("--model-name", default="auto",
+                    help="Classifier the explanation was computed on. 'auto' (default) picks it from the "
+                         "defense recorded in --result (`defense` field, else the filename's -{defense}- part) "
+                         "via piarena.xai.classifiers; an explicit name wins.")
+    p.add_argument("--alignment-mass", type=float, nargs="+", default=[0.5],
+                    help="Alignment metric (injected_top_mass_precision): the 'most important' tokens are the "
+                         "smallest set covering at least this fraction of the total |SHAP|. One value per "
+                         "fraction; the first is the one plotted in alignment_histogram.png.")
     p.add_argument("--algorithm", default="syntax", choices=["syntax", "shap"],
                     help="syntaxshap-only: tree-restricted ('syntax') vs. unrestricted ('shap') coalition "
                          "enumeration. Ignored for --xai-method kernelshap.")
@@ -129,12 +138,28 @@ def _guess_attack(result_path: str | None) -> str:
     return "unknown"
 
 
+def _guess_defense(result: dict, result_path: str | None) -> str | None:
+    """Defense whose decision was explained: the `defense` field main.py now
+    records on every sample, else the filename part right before the
+    `-{xai}-` one (`{dataset}-{llm}-{attack}-{defense}-{xai}-{seed}.json`) for
+    results written before that field existed."""
+    for sample in result.values():
+        if sample.get("defense"):
+            return sample["defense"]
+    if result_path:
+        parts = os.path.splitext(os.path.basename(result_path))[0].split("-")
+        for i, part in enumerate(parts):
+            if part in _XAI_METHODS and i > 0:
+                return parts[i - 1]
+    return None
+
+
 def load_json(path):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def _load_explainer(xai_method: str, model_name: str, algorithm: str):
+def _load_explainer(xai_method: str, model_name: str, algorithm: str, trust_remote_code: bool = False):
     """Returns `(explainer, make_rescorer)` — `make_rescorer(context)` builds
     a `rescore_fn(keep_mask) -> float` closure using exactly the masking
     mechanism the given method's own explainer uses. Deferred, heavy imports
@@ -159,14 +184,14 @@ def _load_explainer(xai_method: str, model_name: str, algorithm: str):
     from piarena.xai.kernelshap.classifier_explainer import ClassifierKernelExplainer
     from piarena.xai.kernelshap.xai_kernelshap import _load_classifier
 
-    tokenizer, model = _load_classifier(model_name)
+    tokenizer, model = _load_classifier(model_name, trust_remote_code=trust_remote_code)
     # `backend=` doesn't matter here — re-scoring (make_rescorer) never calls
     # captum or shap, it only runs the model directly. Left at the default.
     explainer = ClassifierKernelExplainer(model, tokenizer)
     return explainer, explainer.make_rescorer
 
 
-def compute_one(sample, make_rescorer, thresholds, skip_alignment=False):
+def compute_one(sample, make_rescorer, thresholds, skip_alignment=False, alignment_masses=(0.5,)):
     # `sample.get("xai_result", {})` would only fall back to `{}` if the key
     # were absent -- but main.py sets it to an explicit `None` (not absent)
     # for every sample the defense didn't block, so `or {}` is needed to
@@ -208,7 +233,9 @@ def compute_one(sample, make_rescorer, thresholds, skip_alignment=False):
     # --attack none: nothing was injected, so the alignment metric is skipped.
     if injected_span is not None and not skip_alignment:
         entry["injected_span"] = injected_span
-        entry["injected_span_percentile"] = injected_span_percentile(values, injected_span)
+        entry["injected_top_mass_precision"] = {
+            str(m): injected_top_mass_precision(values, injected_span, m) for m in alignment_masses
+        }
     return entry
 
 
@@ -299,7 +326,15 @@ def main():
     plots_dir = os.path.join(out_dir, "plots", stem)
     os.makedirs(plots_dir, exist_ok=True)
 
-    explainer, make_rescorer = _load_explainer(xai_method, args.model_name, args.algorithm)
+    defense = _guess_defense(result, args.result)
+    # No recorded defense (very old result file) -> promptguard, the only one it could be.
+    classifier = resolve_classifier(
+        defense or "promptguard", None if args.model_name == "auto" else {"model_name": args.model_name},
+    )
+    model_name = classifier["model_name"]
+    explainer, make_rescorer = _load_explainer(
+        xai_method, model_name, args.algorithm, classifier.get("trust_remote_code", False),
+    )
 
     attack = _guess_attack(args.result)
     no_attack = attack == "none"
@@ -308,14 +343,16 @@ def main():
     t0 = time.time()
     n_done = 0
     for idx, sample in result.items():
-        entry = compute_one(sample, make_rescorer, args.thresholds, skip_alignment=no_attack)
+        entry = compute_one(
+            sample, make_rescorer, args.thresholds, skip_alignment=no_attack, alignment_masses=args.alignment_mass,
+        )
         if entry is None:
             continue
         per_sample[idx] = entry
         n_done += 1
     elapsed = time.time() - t0
 
-    aggregate = _aggregate(per_sample, args.thresholds)
+    aggregate = _aggregate(per_sample, args.thresholds, args.alignment_mass)
     aggregate["runtime"] = {
         "mean_seconds_per_sample": elapsed / n_done if n_done else None,
         "total_seconds": elapsed,
@@ -323,14 +360,16 @@ def main():
     }
     aggregate["asr_utility"] = _asr_utility_summary(result)
     aggregate["category_summary"] = _category_summary(result, per_sample, args.thresholds)
-    if no_attack:
-        aggregate["confusion_matrix"] = _confusion_matrix(result)
+    aggregate["confusion_matrix"] = _confusion_matrix(result, attack)
 
     metrics_out = {
         "meta": {
             "result_path": args.result,
             "xai_method": xai_method,
-            "model_name": args.model_name,
+            "model_name": model_name,
+            "defense": defense,
+            "attack": attack,
+            "alignment_masses": args.alignment_mass,
             # None for kernelshap (algorithm only applies to syntaxshap's
             # coalition enumeration) rather than omitted, so downstream
             # consumers can rely on the key always being present.
@@ -353,9 +392,11 @@ def main():
     print(f"Wrote {report_path}")
 
     try:
-        _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples=args.max_plot_samples)
-        if no_attack:
-            _render_confusion_matrix(aggregate["confusion_matrix"], plots_dir)
+        _render_plots(
+            result, per_sample, plots_dir, xai_method, attack, max_samples=args.max_plot_samples,
+            defense=defense, model_name=model_name, alignment_mass=args.alignment_mass[0],
+        )
+        _render_confusion_matrix(aggregate["confusion_matrix"], plots_dir, defense, model_name, attack)
     except ImportError as e:
         print(f"Skipping plots (shap/matplotlib not installed): {e}")
 
@@ -399,43 +440,52 @@ def _log_to_wandb(metrics_out, per_sample, plots_dir, thresholds):
         with open(saliency_html, "r", encoding="utf-8") as f:
             log_payload["saliency_maps"] = wandb.Html(f.read())
 
-    columns = ["idx", *[f"fidelity@{t}" for t in thresholds], "timed_out", "injected_span_percentile"]
+    masses = meta.get("alignment_masses") or [0.5]
+    columns = ["idx", *[f"fidelity@{t}" for t in thresholds], "timed_out",
+               *[f"injected_top_mass_precision@{m}" for m in masses]]
     table = wandb.Table(columns=columns)
     for idx, entry in per_sample.items():
         table.add_data(
             idx,
             *[entry.get("fidelity", {}).get(str(t)) for t in thresholds],
             entry.get("timed_out"),
-            entry.get("injected_span_percentile"),
+            *[(entry.get("injected_top_mass_precision") or {}).get(str(m)) for m in masses],
         )
     log_payload["per_sample"] = table
 
     wandb.log(log_payload)
     # `aggregate` already has exactly the numbers worth seeing on the run's
-    # summary tab (fidelity_mean, acc_at_1_rate, injected_span_percentile,
+    # summary tab (fidelity_mean, acc_at_1_rate, injected_top_mass_precision,
     # timed_out, runtime, asr_utility) — no need to re-derive anything.
     wandb.summary.update(metrics_out["aggregate"])
     wandb.finish()
 
 
-def _confusion_matrix(result: dict) -> dict:
-    """Confusion matrix for `--attack none`, computed over the WHOLE raw
-    result. Positive class = benign; every prompt is truly benign, so a
-    prompt the defense let through is a TP and a blocked one is an FN
-    (TN/FP stay 0 — kept in the output so the matrix is always 2x2)."""
+def _confusion_matrix(result: dict, attack: str) -> dict:
+    """Confusion matrix over the WHOLE raw result (blocked or not, explained
+    or not). Positive class = malign; predicted malign = blocked by the defense.
+
+    The true label comes from the attack: `--attack none` leaves every prompt
+    benign, any other attack injected a task into every prompt (malign). So a
+    run only fills one row of the matrix: none -> FP (blocked) / TN (not
+    blocked); with an attack -> TP (blocked) / FN (not blocked). Samples whose
+    defense result has no `detect_flag` are not counted."""
     flags = [s.get("defense_result", {}).get("detect_flag") for s in result.values()]
-    tp = sum(1 for f in flags if f is False)
-    fn = sum(1 for f in flags if f is True)
-    total = tp + fn
+    blocked = sum(1 for f in flags if f is True)
+    not_blocked = sum(1 for f in flags if f is False)
+    truly_malign = attack != "none"
+    tp, fn = (blocked, not_blocked) if truly_malign else (0, 0)
+    fp, tn = (0, 0) if truly_malign else (blocked, not_blocked)
     return {
-        "positive_class": "benign",
-        "TP": tp, "FN": fn, "TN": 0, "FP": 0,
-        "n": total,
-        "recall_benign": float(tp / total) if total else None,
+        "positive_class": "malign",
+        "TP": tp, "FN": fn, "FP": fp, "TN": tn,
+        "n": blocked + not_blocked,
+        "recall_malign": float(tp / (tp + fn)) if (tp + fn) else None,
+        "fpr": float(fp / (fp + tn)) if (fp + tn) else None,
     }
 
 
-def _aggregate(per_sample, thresholds):
+def _aggregate(per_sample, thresholds, alignment_masses=(0.5,)):
     def mean_by_t(key):
         out = {}
         for t in thresholds:
@@ -443,19 +493,27 @@ def _aggregate(per_sample, thresholds):
             out[str(t)] = float(np.mean(vals)) if vals else None
         return out
 
-    # per_sample only ever contains samples the defense blocked (XAI now only
-    # runs on those, see main.py) — no true-positive/false-negative cohort to
-    # split by anymore, just one population.
-    percentiles = [e["injected_span_percentile"] for e in per_sample.values() if e.get("injected_span_percentile") is not None]
+    # per_sample holds the samples the XAI method chose to explain (its
+    # `explain_scope`: blocked ones by default, all with --xai_scope all).
+    alignment = {}
+    for m in alignment_masses:
+        vals = [
+            e["injected_top_mass_precision"][str(m)] for e in per_sample.values()
+            if (e.get("injected_top_mass_precision") or {}).get(str(m)) is not None
+        ]
+        alignment[str(m)] = {
+            "n_explained": len(vals),
+            "mean": float(np.mean(vals)) if vals else None,
+            "median": float(np.median(vals)) if vals else None,
+        }
     n_timed_out = sum(1 for e in per_sample.values() if e.get("timed_out"))
 
     return {
         "fidelity_mean": mean_by_t("fidelity"),
         "acc_at_1_rate": mean_by_t("acc_at_1"),
-        "injected_span_percentile": {
-            "n_explained": len(percentiles),
-            "mean_percentile": float(np.mean(percentiles)) if percentiles else None,
-        },
+        # {mass: {n_explained, mean, median}} of injected_top_mass_precision —
+        # see piarena/xai/metrics.py. Empty values for --attack none.
+        "injected_top_mass_precision": alignment,
         # How many of the explained (blocked) samples only got a PARTIAL
         # explanation because the per-sample timeout fired mid-way (see
         # classifier_explainer.py's explain_context) — the coverage-bias
@@ -477,11 +535,14 @@ def _render_report(metrics_out) -> str:
     if meta.get("algorithm"):
         title += f" ({meta['algorithm']})"
     title += f" ({meta['model_name']})"
+    n_blocked_expl = sum(1 for e in metrics_out["per_sample"].values() if e.get("detect_flag") is True)
     lines = [
         title,
         "",
+        f"- Defense explained: `{meta.get('defense')}` (classifier `{meta['model_name']}`), attack: `{meta.get('attack')}`",
         f"- Result file: `{meta['result_path']}`",
-        f"- Samples explained{' (all, --attack none)' if meta.get('no_attack') else ' (blocked by the defense)'}: {meta['n_samples']}",
+        f"- Samples explained: {meta['n_samples']} "
+        f"({n_blocked_expl} blocked, {meta['n_samples'] - n_blocked_expl} not blocked)",
         f"- Runtime: {agg['runtime']['mean_seconds_per_sample']:.2f}s/sample "
         f"({agg['runtime']['total_seconds']:.1f}s total)" if agg['runtime']['mean_seconds_per_sample'] else "- Runtime: n/a",
         f"- Timed out (partial explanation, per-sample timeout hit): "
@@ -498,33 +559,38 @@ def _render_report(metrics_out) -> str:
         lines.append(
             f"| {t} | {agg['fidelity_mean'].get(key)} | {agg['acc_at_1_rate'].get(key)} |"
         )
-    span = agg["injected_span_percentile"]
+    cm = agg["confusion_matrix"]
+    lines += [
+        "",
+        f"## Matriz de confusão (positivo = malign, defesa `{meta.get('defense')}`)",
+        "",
+        "Rótulo real pelo ataque (`none` = benigno, qualquer outro = malign); predito malign = bloqueado. "
+        "Calculada sobre o resultado bruto inteiro.",
+        "",
+        "| | predito malign (bloqueado) | predito benign (não bloqueado) |",
+        "|---|---|---|",
+        f"| **real malign** | TP = {cm['TP']} | FN = {cm['FN']} |",
+        f"| **real benign** | FP = {cm['FP']} | TN = {cm['TN']} |",
+        "",
+        f"- Recall (malign) = TP/(TP+FN): {cm['recall_malign']}",
+        f"- Taxa de falso positivo = FP/(FP+TN): {cm['fpr']}",
+        "",
+    ]
     if meta.get("no_attack"):
-        cm = agg["confusion_matrix"]
-        lines += [
-            "",
-            "## Matriz de confusão (--attack none, positivo = benign)",
-            "",
-            "Todos os prompts são benignos: não bloqueado = TP, bloqueado = FN.",
-            "",
-            "| | predito benign (não bloqueado) | predito malign (bloqueado) |",
-            "|---|---|---|",
-            f"| **real benign** | TP = {cm['TP']} | FN = {cm['FN']} |",
-            f"| **real malign** | FP = {cm['FP']} | TN = {cm['TN']} |",
-            "",
-            f"- Recall (benign): {cm['recall_benign']}",
-            "- Métrica de alinhamento (span injetado) não calculada: não há injeção.",
-            "",
-        ]
+        lines += ["- Métrica de alinhamento (span injetado) não calculada: não há injeção.", ""]
     else:
         lines += [
+            "## Alinhamento (span injetado)",
             "",
-            "## Alinhamento semântico (span injetado)",
+            "`injected_top_mass_precision`: % dos tokens mais importantes (menor conjunto que soma pelo menos "
+            "`massa` do |SHAP| total) que estão dentro do trecho injetado.",
             "",
-            f"- Amostras explicadas: {span['n_explained']}",
-            f"- Percentil médio do span injetado: {span['mean_percentile']}",
-            "",
+            "| massa | amostras | média | mediana |",
+            "|---|---|---|---|",
         ]
+        for m, row in agg["injected_top_mass_precision"].items():
+            lines.append(f"| {m} | {row['n_explained']} | {row['mean']} | {row['median']} |")
+        lines.append("")
 
     au = agg["asr_utility"]
     lines += [
@@ -630,7 +696,8 @@ def _mark_injected_span(html: str, injected_span: dict | None) -> str:
     return _TOKEN_DIV_RE.sub(repl, html)
 
 
-def _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples=None):
+def _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples=None,
+                  defense=None, model_name=None, alignment_mass=0.5):
     import shap  # official shap package — plotting only, not computation
     import matplotlib
     matplotlib.use("Agg")
@@ -654,7 +721,8 @@ def _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples
         blocked = defense_result.get("detect_flag")
         status = "BLOQUEADO" if blocked else "NÃO BLOQUEADO"
         header = (
-            f"<h3>Sample {idx} — {status} — attack={attack}, category={sample.get('category')}, "
+            f"<h3>Sample {idx} — {status} — defense={defense} ({model_name}), attack={attack}, "
+            f"category={sample.get('category')}, "
             f"predicted_label={xai.get('predicted_label')}, "
             f"detect_flag={blocked}, "
             f"P(benign)={p_benign}, P(malign)={p_malign}</h3>"
@@ -670,7 +738,8 @@ def _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples
             break
 
     n = len(sample_blocks)
-    html_parts = [f"<html><head><meta charset='utf-8'><title>{xai_method} saliency maps ({attack})</title></head><body>"]
+    html_parts = [f"<html><head><meta charset='utf-8'><title>{xai_method} saliency maps — {defense} ({attack})</title></head><body>",
+                  f"<h2>Defense explained: {defense} ({model_name}) — attack: {attack}</h2>"]
     html_parts.extend(sample_blocks)
     html_parts.append("</body></html>")
     with open(os.path.join(plots_dir, "saliency_maps.html"), "w", encoding="utf-8") as f:
@@ -679,20 +748,20 @@ def _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples
 
     _render_fidelity_acc_bars(per_sample, plots_dir)
     if attack != "none":
-        _render_alignment_histogram(per_sample, plots_dir)
+        _render_alignment_histogram(per_sample, plots_dir, alignment_mass)
 
 
-def _render_confusion_matrix(cm: dict, plots_dir):
-    """2x2 confusion-matrix PNG for `--attack none` (positive = benign)."""
+def _render_confusion_matrix(cm: dict, plots_dir, defense=None, model_name=None, attack=None):
+    """2x2 confusion-matrix PNG (positive = malign; predicted malign = blocked)."""
     import matplotlib.pyplot as plt
 
     grid = np.array([[cm["TP"], cm["FN"]], [cm["FP"], cm["TN"]]])
     fig, ax = plt.subplots()
     ax.imshow(grid, cmap="Blues")
     ax.set_xticks([0, 1])
-    ax.set_xticklabels(["benign\n(não bloqueado)", "malign\n(bloqueado)"])
+    ax.set_xticklabels(["malign\n(bloqueado)", "benign\n(não bloqueado)"])
     ax.set_yticks([0, 1])
-    ax.set_yticklabels(["benign", "malign"])
+    ax.set_yticklabels(["malign", "benign"])
     ax.set_xlabel("predito")
     ax.set_ylabel("real")
     labels = [["TP", "FN"], ["FP", "TN"]]
@@ -700,7 +769,7 @@ def _render_confusion_matrix(cm: dict, plots_dir):
         for j in range(2):
             ax.text(j, i, f"{labels[i][j]}\n{grid[i, j]}", ha="center", va="center",
                     color="white" if grid[i, j] > grid.max() / 2 else "black")
-    ax.set_title("Matriz de confusão — --attack none (positivo = benign)")
+    ax.set_title(f"Matriz de confusão — defesa {defense} ({model_name})\nataque {attack} (positivo = malign)", fontsize=9)
     fig.savefig(os.path.join(plots_dir, "confusion_matrix.png"), bbox_inches="tight")
     plt.close(fig)
     print(f"Wrote {os.path.join(plots_dir, 'confusion_matrix.png')}")
@@ -742,21 +811,24 @@ def _render_fidelity_acc_bars(per_sample, plots_dir):
     print(f"Wrote {os.path.join(plots_dir, 'fidelity_acc_bars.png')}")
 
 
-def _render_alignment_histogram(per_sample, plots_dir):
-    """Histogram of injected_span_percentile across every explained (blocked)
-    sample — the distribution behind the single mean reported in the
-    Markdown report's "Alinhamento semântico" section."""
+def _render_alignment_histogram(per_sample, plots_dir, mass=0.5):
+    """Histogram of injected_top_mass_precision (at `mass`) across every
+    explained sample — the distribution behind the mean reported in the
+    Markdown report's "Alinhamento" section."""
     import matplotlib.pyplot as plt
 
-    percentiles = [e["injected_span_percentile"] for e in per_sample.values() if e.get("injected_span_percentile") is not None]
-    if not percentiles:
+    values = [
+        e["injected_top_mass_precision"][str(mass)] for e in per_sample.values()
+        if (e.get("injected_top_mass_precision") or {}).get(str(mass)) is not None
+    ]
+    if not values:
         return
 
     fig, ax = plt.subplots()
-    ax.hist(percentiles, bins=min(20, max(5, len(percentiles))), range=(0, 1))
-    ax.set_xlabel("injected_span_percentile")
+    ax.hist(values, bins=min(20, max(5, len(values))), range=(0, 1))
+    ax.set_xlabel(f"injected_top_mass_precision (massa {mass})")
     ax.set_ylabel("# samples")
-    ax.set_title("Distribuição do alinhamento semântico (span injetado)")
+    ax.set_title("Alinhamento: % dos tokens mais importantes dentro do span injetado")
     fig.savefig(os.path.join(plots_dir, "alignment_histogram.png"), bbox_inches="tight")
     plt.close(fig)
     print(f"Wrote {os.path.join(plots_dir, 'alignment_histogram.png')}")

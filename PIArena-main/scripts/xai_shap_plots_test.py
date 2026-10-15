@@ -7,7 +7,7 @@ the `_metrics.json` (which only has scalars). Needs `xai_result["context"]` with
 
 Output, all inside `<result dir>/xai_metrics/plots/<result-stem>/` (the same
 per-attack folder that holds saliency_maps.html; override base with --out-dir):
-  bar_global.png     — mean |SHAP| per token across blocked samples
+  bar_global.png     — mean |SHAP| per token across explained samples
   saliency_bars.html — one local shap.plots.bar per blocked sample
 
 Usage:
@@ -19,6 +19,7 @@ import html
 import io
 import json
 import os
+import sys
 from collections import defaultdict
 
 import numpy as np
@@ -28,25 +29,42 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import shap  # noqa: E402
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from piarena.xai.metrics import injected_top_mass_precision  # noqa: E402
+
 
 def _clean(tok: str) -> str:
     t = tok.replace("\n", "\\n").strip()
     return t if t else "·"
 
 
-def load_blocked(path, include_unblocked=None):
-    """{idx: dict} of samples with an explained context that the defense blocked.
+_XAI_METHODS = ("syntaxshap", "kernelshap")
 
-    `include_unblocked` also keeps samples the defense let through; defaults to
-    True for `--attack none` result files (main.py explains every sample
-    there), False otherwise."""
-    if include_unblocked is None:
-        include_unblocked = "-none-" in os.path.basename(path)
+
+def _defense_from_filename(path):
+    """`{dataset}-{llm}-{attack}-{defense}-{xai}-{seed}.json` -> the defense part
+    (fallback for result files that predate the per-sample `defense` field)."""
+    parts = os.path.splitext(os.path.basename(path))[0].split("-")
+    for i, part in enumerate(parts):
+        if part in _XAI_METHODS and i > 0:
+            return parts[i - 1]
+    return None
+
+
+def load_blocked(path, include_unblocked=True):
+    """{idx: dict} of samples with an explained context.
+
+    Which samples have one is decided by the XAI method's `explain_scope` (an
+    unexplained sample has `xai_result=None`), so by default every explained
+    sample is kept, blocked or not; `include_unblocked=False` keeps only the
+    ones the defense blocked. Each entry carries the `defense`/`xai_model` the
+    explanation is about."""
     with open(path, encoding="utf-8") as f:
         result = json.load(f)
+    file_defense = _defense_from_filename(path)
     out = {}
     for idx, s in result.items():
-        # xai_result is explicit None (not absent) for non-blocked samples
+        # xai_result is explicit None (not absent) for non-explained samples
         ctx = (s.get("xai_result") or {}).get("context")
         if not ctx or not ctx.get("values"):
             continue
@@ -64,8 +82,19 @@ def load_blocked(path, include_unblocked=None):
             "label": ctx.get("predicted_label"),
             "span": ctx.get("injected_span"),
             "category": s.get("category"),
+            "defense": s.get("defense") or file_defense,
+            "xai_model": s.get("xai_model"),
         }
     return out
+
+
+def defense_label(data):
+    """'piguard (leolee99/PIGuard)'-style label for titles, from the first sample."""
+    first = next(iter(data.values()), {})
+    defense, model = first.get("defense"), first.get("xai_model")
+    if defense and model:
+        return f"{defense} ({model})"
+    return defense or "unknown defense"
 
 
 def span_mask(d):
@@ -75,15 +104,10 @@ def span_mask(d):
     return m
 
 
-def span_percentile(d):
-    """Mean |value|-rank percentile of the injected span's tokens (same idea as
-    piarena/xai/metrics.py::injected_span_percentile)."""
-    m = span_mask(d)
-    if not m.any():
-        return None
-    a = np.abs(d["values"])
-    ranks = a.argsort().argsort() / max(len(a) - 1, 1)
-    return float(ranks[m].mean())
+def span_alignment(d, mass=0.5):
+    """injected_top_mass_precision of this sample (piarena/xai/metrics.py);
+    None when there is no injected span."""
+    return injected_top_mass_precision(d["values"], d["span"], mass)
 
 
 def explanation(d, mark_span=True):
@@ -128,20 +152,21 @@ def write_saliency_bars_html(data, local_dir, top_k=15, max_samples=None):
         except Exception as e:
             plt.close("all")
             body = f"<p>(failed to render: {html.escape(str(e))})</p>"
-        pct = span_percentile(d)
+        pct = span_alignment(d)
         status = "BLOQUEADO" if d.get("blocked") else "NÃO BLOQUEADO"
-        head = (f"<h3>Sample {i} — {status} — category={html.escape(str(d['category']))}, "
+        head = (f"<h3>Sample {i} — {status} — defense={html.escape(defense_label({i: d}))} — category={html.escape(str(d['category']))}, "
                 f"predicted_label={d['label']}, P(benign)={d.get('p_benign')}, P(malign)={d['p_malign']}, "
-                f"span percentile={'n/a' if pct is None else f'{pct:.2f}'}</h3>")
+                f"alignment (top-mass precision)={'n/a' if pct is None else f'{pct:.2f}'}</h3>")
         blocks.append(head + body)
         n += 1
-    page = ("<html><head><meta charset='utf-8'><title>local shap.plots.bar per blocked sample</title></head><body>"
+    page = ("<html><head><meta charset='utf-8'><title>local shap.plots.bar per explained sample</title></head><body>"
+            f"<h2>Defense explained: {html.escape(defense_label(data))}</h2>"
             "<p>▶ = token inside the injected span. Bars: top tokens by |value|; rest grouped.</p>"
             + "\n".join(blocks) + "</body></html>")
     path = os.path.join(local_dir, "saliency_bars.html")
     with open(path, "w", encoding="utf-8") as f:
         f.write(page)
-    print(f"wrote {path} ({n} blocked sample(s))")
+    print(f"wrote {path} ({n} explained sample(s))")
 
 
 # --------------------------------------------------------------- global plots
@@ -157,7 +182,7 @@ def plot_bar_global(data, out_dir, top_k=20, min_count=5):
     e = shap.Explanation(values=np.array([m for _, m, _ in rows]), feature_names=names)
     plt.figure()
     shap.plots.bar(e, max_display=top_k, show=False)
-    plt.title(f"mean |SHAP| per token (n>={min_count}, {len(data)} blocked samples)", fontsize=9)
+    plt.title(f"{defense_label(data)} — mean |SHAP| per token (n>={min_count}, {len(data)} explained samples)", fontsize=9)
     _save(os.path.join(out_dir, "bar_global.png"))
 
 
@@ -167,6 +192,10 @@ def main():
     ap.add_argument("--out-dir", default=None, help="default: <result dir>/xai_metrics")
     ap.add_argument("--top-k", type=int, default=15)
     ap.add_argument("--max-html-samples", type=int, default=None)
+    ap.add_argument("--min-count", type=int, default=5,
+                    help="bar_global.png only ranks tokens seen at least this many times. Default 5 (drops one-off "
+                         "tokens); use 1 when each word appears few times, e.g. NotInject (every trigger word is "
+                         "nearly unique, so 5 hides all of them).")
     args = ap.parse_args()
 
     stem = os.path.splitext(os.path.basename(args.result))[0]
@@ -176,7 +205,7 @@ def main():
     os.makedirs(local_dir, exist_ok=True)
 
     data = load_blocked(args.result)
-    print(f"{len(data)} blocked sample(s) with XAI values")
+    print(f"{len(data)} explained sample(s) with XAI values ({defense_label(data)})")
     if not data:
         return
 
@@ -185,7 +214,7 @@ def main():
     if errs:
         print(f"additivity |base+sum-full|: max={max(errs):.2e} mean={np.mean(errs):.2e}")
 
-    _try("bar_global", lambda: plot_bar_global(data, local_dir))
+    _try("bar_global", lambda: plot_bar_global(data, local_dir, min_count=args.min_count))
     _try("html", lambda: write_saliency_bars_html(data, local_dir, args.top_k, args.max_html_samples))
 
 

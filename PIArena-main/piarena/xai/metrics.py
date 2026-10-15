@@ -84,25 +84,36 @@ def acc_at_1(
     return out
 
 
-def injected_span_percentile(values: Sequence[float], injected_span: Optional[dict]) -> Optional[float]:
-    """Mean percentile rank (0-1, higher = more important) of the tokens
-    inside `injected_span` among *all* tokens of the explained text — "does
-    the explanation find the truly-injected content within the rest of the
-    (legitimate) text?" (métrica 5 do plano — the classification-adapted,
-    whole-context version of the paper's Semantic Alignment, Section 5.4)."""
+def injected_top_mass_precision(
+    values: Sequence[float], injected_span: Optional[dict], mass: float = 0.5
+) -> Optional[float]:
+    """Alignment between the explanation and the injected text: the fraction
+    of the *most important* tokens that lie inside `injected_span`.
+
+    "Most important" = the smallest set of tokens, taken in decreasing |value|
+    order, whose |values| add up to at least `mass` (default 50%) of the total
+    |value|. So a single dominant token (e.g. an "Ignore" with a huge SHAP
+    value) is the whole set by itself: if it sits inside the injected span the
+    score is high even when the span's other tokens have low values — unlike a
+    mean over the span's tokens, which that one token would not move.
+
+    Returns None without a span / values, or when every value is 0."""
     if not injected_span or len(values) == 0:
         return None
-    values = np.asarray(values, dtype=float)
-    order = np.argsort(np.abs(values))  # ascending |value|
-    ranks = np.empty(len(values), dtype=float)
-    ranks[order] = np.arange(len(values))
-    denom = max(1, len(values) - 1)
-    percentiles = ranks / denom
-    start, end = injected_span["start_token"], injected_span["end_token"]
-    span_percentiles = percentiles[start:end]
-    if len(span_percentiles) == 0:
+    if not 0.0 < mass <= 1.0:
+        raise ValueError(f"mass must be in (0, 1], got {mass!r}")
+    magnitudes = np.abs(np.asarray(values, dtype=float))
+    total = magnitudes.sum()
+    if total <= 0:
         return None
-    return float(np.mean(span_percentiles))
+    order = np.argsort(-magnitudes, kind="stable")  # descending |value|
+    cumulative = np.cumsum(magnitudes[order])
+    # tolerance guards float round-off when `mass` lands exactly on a partial sum
+    n_top = int(np.searchsorted(cumulative, mass * total * (1 - 1e-12), side="left")) + 1
+    top = order[:n_top]
+    start, end = injected_span["start_token"], injected_span["end_token"]
+    inside = np.count_nonzero((top >= start) & (top < end))
+    return float(inside / len(top))
 
 
 

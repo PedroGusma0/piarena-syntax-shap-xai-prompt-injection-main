@@ -28,7 +28,7 @@ Metrics computed per common, token-matching sample, over the two backends'
 `values` vectors:
   - pearson_r      — linear correlation of the raw signed values.
   - spearman_rho    — rank correlation of |values| (same magnitude-rank
-                      convention as `top_t_mask`/`injected_span_percentile`,
+                      convention as `top_t_mask`/`injected_top_mass_precision`,
                       reused below from `piarena/xai/metrics.py`) — the
                       direct analogue of the removed `syntax` vs. `syntax-w`
                       `spearman()` metric (see that module's trailing
@@ -40,8 +40,8 @@ Metrics computed per common, token-matching sample, over the two backends'
   - topk_overlap[t] — Jaccard overlap between the two backends' top-t% most
                       important words (`top_t_mask`, reused, not
                       reimplemented).
-  - injected_span_percentile_diff — difference between the two backends'
-                      `injected_span_percentile` (also reused) — do they
+  - injected_top_mass_precision_diff — difference between the two backends'
+                      `injected_top_mass_precision` (also reused, default mass 0.5) — do they
                       disagree about whether the *injected* text specifically
                       stood out?
 
@@ -65,7 +65,7 @@ import os
 import numpy as np
 from scipy.stats import pearsonr, spearmanr
 
-from piarena.xai.metrics import injected_span_percentile, top_t_mask
+from piarena.xai.metrics import injected_top_mass_precision, top_t_mask
 
 
 def parse_args():
@@ -186,8 +186,8 @@ def compare_sample(values_a, values_b, injected_span, thresholds) -> dict:
         mask_b = top_t_mask(values_b, t)
         topk_overlap[str(t)] = _jaccard(mask_a, mask_b)
 
-    pct_a = injected_span_percentile(values_a, injected_span)
-    pct_b = injected_span_percentile(values_b, injected_span)
+    pct_a = injected_top_mass_precision(values_a, injected_span)
+    pct_b = injected_top_mass_precision(values_b, injected_span)
     pct_diff = (pct_a - pct_b) if (pct_a is not None and pct_b is not None) else None
 
     return {
@@ -195,9 +195,9 @@ def compare_sample(values_a, values_b, injected_span, thresholds) -> dict:
         "spearman_rho": spearman_rho,
         "sign_agreement": sign_agreement,
         "topk_overlap": topk_overlap,
-        "injected_span_percentile_a": pct_a,
-        "injected_span_percentile_b": pct_b,
-        "injected_span_percentile_diff": pct_diff,
+        "injected_top_mass_precision_a": pct_a,
+        "injected_top_mass_precision_b": pct_b,
+        "injected_top_mass_precision_diff": pct_diff,
     }
 
 
@@ -217,7 +217,7 @@ def aggregate_metrics(per_sample: dict, thresholds) -> dict:
         "pearson_r": _stats([s["pearson_r"] for s in per_sample.values()]),
         "spearman_rho": _stats([s["spearman_rho"] for s in per_sample.values()]),
         "sign_agreement": _stats([s["sign_agreement"] for s in per_sample.values()]),
-        "injected_span_percentile_diff": _stats([s["injected_span_percentile_diff"] for s in per_sample.values()]),
+        "injected_top_mass_precision_diff": _stats([s["injected_top_mass_precision_diff"] for s in per_sample.values()]),
         "topk_overlap": per_threshold,
     }
 
@@ -254,7 +254,7 @@ def _render_report(attack: str, out: dict) -> str:
         "| metric | mean | std |",
         "|---|---|---|",
     ]
-    for key in ("pearson_r", "spearman_rho", "sign_agreement", "injected_span_percentile_diff"):
+    for key in ("pearson_r", "spearman_rho", "sign_agreement", "injected_top_mass_precision_diff"):
         row = agg[key]
         lines.append(f"| {key} | n/a | n/a |" if row is None else f"| {key} | {row['mean']:.4f} | {row['std']:.4f} |")
 
@@ -315,7 +315,7 @@ def _log_to_wandb(args, attack: str, out: dict):
 
     agg = out["aggregate"]
     table = wandb.Table(columns=["metric", "n", "mean", "std"])
-    for key in ("pearson_r", "spearman_rho", "sign_agreement", "injected_span_percentile_diff"):
+    for key in ("pearson_r", "spearman_rho", "sign_agreement", "injected_top_mass_precision_diff"):
         row = agg[key]
         if row is not None:
             table.add_data(key, row["n"], row["mean"], row["std"])
@@ -382,7 +382,7 @@ def main():
 
     aggregate = aggregate_metrics(per_sample, args.thresholds) if per_sample else {
         "pearson_r": None, "spearman_rho": None, "sign_agreement": None,
-        "injected_span_percentile_diff": None,
+        "injected_top_mass_precision_diff": None,
         "topk_overlap": {str(t): None for t in args.thresholds},
     }
 

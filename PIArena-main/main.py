@@ -18,6 +18,7 @@ from piarena.llm import Model
 from piarena.attacks import get_attack
 from piarena.defenses import get_defense
 from piarena.xai import get_xai
+from piarena.xai.classifiers import resolve_classifier
 from piarena.evaluations import (
     llm_judge, open_prompt_injection_utility,
     substring_match, longbench_metric_dict,
@@ -65,6 +66,10 @@ def parse_args():
                              "without needing a YAML --config. Ignored by any --xai method other than "
                              "kernelshap (silently accepted into xai_config, per BaseXAI's unchecked "
                              "config merge — see piarena/xai/base.py).")
+    parser.add_argument('--xai_scope', type=str, default=None, choices=['auto', 'blocked', 'all'],
+                        help="Override the XAI plugin's `explain_scope` config key: which samples get explained — "
+                             "auto (default: blocked ones; every sample with --attack none) | blocked | all "
+                             "(blocked and not blocked, any attack).")
 
     args = parser.parse_args()
 
@@ -94,6 +99,8 @@ def parse_args():
     args.xai_config = file_config.get("xai_config", None)
     if args.xai_backend is not None:
         args.xai_config = {**(args.xai_config or {}), "backend": args.xai_backend}
+    if args.xai_scope is not None:
+        args.xai_config = {**(args.xai_config or {}), "explain_scope": args.xai_scope}
 
     print(args)
     return args
@@ -149,9 +156,15 @@ def main(args):
     print(f"Initialized defense: {defense}")
 
     # Instantiate XAI method (opt-in; None unless --xai is passed)
-    xai = get_xai(args.xai, config=args.xai_config) if args.xai else None
+    xai_config = args.xai_config
+    if args.xai == "kernelshap":
+        # Explain the classifier the defense actually uses (e.g. PIGuard for
+        # --defense piguard), not the plugin's default model; an explicit
+        # `model_name` in xai_config still wins.
+        xai_config = resolve_classifier(args.defense, xai_config)
+    xai = get_xai(args.xai, config=xai_config) if args.xai else None
     if xai is not None:
-        print(f"Initialized XAI method: {xai}")
+        print(f"Initialized XAI method: {xai} (config: {xai.config})")
 
     # Result paths
     llm_name = args.backend_llm.replace('/', '-')
@@ -274,11 +287,11 @@ def main(args):
         result_dp["defense_result"] = defense_result
         print(f"[{idx+1}/{len(dataset)}] Defense phase done ({time.time() - phase_t0:.1f}s).")
 
-        # XAI phase (opt-in). Only runs on samples the defense actually
-        # blocked (detect_flag=True) — explaining a decision that let the
-        # prompt through is out of scope for this experiment (the point is
-        # to explain *why the defense blocked*), and skipping the rest is
-        # what makes the per-sample cost tractable.
+        # XAI phase (opt-in). Which samples get explained is the XAI method's
+        # `explain_scope` (BaseXAI.should_explain): by default ("auto") only
+        # the ones the defense blocked (the point is to explain *why the
+        # defense blocked*, and skipping the rest is what keeps the per-sample
+        # cost tractable), or all of them with `--xai_scope all`.
         xai_phase_s = None  # captured here (not re-derived from phase_t0 later —
                              # phase_t0 gets reused/reset by the Evaluation phase
                              # right below) so the W&B per-sample log can report it.
@@ -287,7 +300,11 @@ def main(args):
         # for the explained decision) instead of only the blocked ones.
         no_attack = attack_name == "none"
         if xai is not None:
-            if defense_result.get("detect_flag") or no_attack:
+            # Recorded so saliency maps/reports can say which defense (and
+            # which classifier) the explanation is about.
+            result_dp["defense"] = args.defense
+            result_dp["xai_model"] = xai.config.get("model_name")
+            if xai.should_explain(defense_result.get("detect_flag"), attack_name):
                 phase_t0 = time.time()
                 print(f"[{idx+1}/{len(dataset)}] XAI phase ({args.xai})... "
                       "this can take from seconds to hours depending on the sample "
@@ -340,7 +357,8 @@ def main(args):
                           f"({type(e).__name__}: {e}) — recorded as an error marker, continuing to the next sample.")
             else:
                 result_dp["xai_result"] = None
-                print(f"[{idx+1}/{len(dataset)}] XAI phase skipped (defense did not block this sample).")
+                print(f"[{idx+1}/{len(dataset)}] XAI phase skipped (explain_scope="
+                      f"{xai.config.get('explain_scope', 'auto')!r}: sample not selected for explanation).")
 
         # Evaluation phase
         phase_t0 = time.time()

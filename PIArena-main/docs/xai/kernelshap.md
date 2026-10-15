@@ -6,7 +6,7 @@ category: xai
 
 # Kernel SHAP
 
-`kernelshap` explains a classifier-based defense's decision using word-level Kernel SHAP values. Two coexisting computation backends are available — [`captum.attr.KernelShap`](https://captum.ai/api/kernel_shap.html) (default) and the official [`shap.KernelExplainer`](https://shap.readthedocs.io/) — both implementing the same Kernel SHAP method (Lundberg & Lee, 2017 — "A Unified Approach to Interpreting Model Predictions"). Currently supports the `promptguard` defense. Only runs on samples the defense actually **blocked** (`detect_flag=True`) — explaining a decision that let the prompt through is out of scope.
+`kernelshap` explains a classifier-based defense's decision using word-level Kernel SHAP values. Two coexisting computation backends are available — [`captum.attr.KernelShap`](https://captum.ai/api/kernel_shap.html) (default) and the official [`shap.KernelExplainer`](https://shap.readthedocs.io/) — both implementing the same Kernel SHAP method (Lundberg & Lee, 2017 — "A Unified Approach to Interpreting Model Predictions"). Supports the `promptguard` and `piguard` defenses: `main.py` picks the classifier to explain from `--defense` (`piarena/xai/classifiers.py`), so `--defense piguard --xai kernelshap` explains `leolee99/PIGuard` (target = P(injection)). Which samples get explained is the `explain_scope` setting (below): by default only the ones the defense **blocked** (`detect_flag=True`), or every sample with `--attack none` / `--xai_scope all`.
 
 Source:
 [piarena/xai/kernelshap/](https://github.com/sleeepeer/PIArena/tree/main/piarena/xai/kernelshap)
@@ -51,7 +51,7 @@ python main.py --dataset squad_v2 --attack direct --defense promptguard --xai ke
 
 ### Comparing backends
 
-`scripts/xai_compare_backends.py` reads two such raw `main.py` result files (one per backend, same dataset/attack/seed) and reports how much their per-word Shapley values agree — Pearson/Spearman correlation, sign agreement, top-k word overlap, and the `injected_span_percentile` gap between backends, per sample and aggregated:
+`scripts/xai_compare_backends.py` reads two such raw `main.py` result files (one per backend, same dataset/attack/seed) and reports how much their per-word Shapley values agree — Pearson/Spearman correlation, sign agreement, top-k word overlap, and the `injected_top_mass_precision` gap between backends, per sample and aggregated:
 
 ```bash
 python scripts/xai_compare_backends.py \
@@ -93,7 +93,9 @@ Samples the defense did **not** block get `xai_result: null` — no explanation 
 
 `DEFAULT_CONFIG`:
 
-- `model_name` (default `"meta-llama/Prompt-Guard-86M"`) — the classifier to explain. Loaded directly via `AutoModelForSequenceClassification` (not `PromptGuardDefense`'s own `pipeline()` instance), so every class's logit is available and coalitions can be evaluated as token-id tensors without re-tokenizing text.
+- `explain_scope` (default `"auto"`) — which samples are explained: `"auto"` (blocked ones; every sample with `--attack none`), `"blocked"` (blocked ones only) or `"all"` (blocked and not blocked, any attack). Change it here, in the YAML `xai_config`, or with `--xai_scope`.
+- `trust_remote_code` (default `false`) — needed by classifiers that ship their own model class (PIGuard); set automatically for `--defense piguard`.
+- `model_name` (default `"meta-llama/Prompt-Guard-86M"`, overridden per defense by `main.py`; an explicit value in `xai_config` wins) — the classifier to explain. Loaded directly via `AutoModelForSequenceClassification` (not `PromptGuardDefense`'s own `pipeline()` instance), so every class's logit is available and coalitions can be evaluated as token-id tensors without re-tokenizing text.
 - `backend` (default `"captum"`) — `"captum"` or `"shap"`, see "Backends" above.
 - `explain_targets` (default `["context"]`) — which span(s) to explain. `"target_inst"` and `"injected_task"` are also accepted (explained in isolation via `explain_row`).
 - `n_samples` (default `"auto"`) — number of sampled coalitions per explained span, resolved once M (word count) is known to `min(2*M + 2048, max_n_samples)`. Used by both backends (never left at captum's own default of `25` — far too low for M beyond a handful of words).
@@ -112,8 +114,9 @@ python scripts/xai_metrics.py --result results/evaluation_results/xai_pilot/squa
 
 Plots written to `<out-dir>/plots/`:
 - `saliency_maps.html` — `shap.plots.text()` per explained sample.
-- `fidelity_acc_bars.png` — mean Fidelity(t)/acc@1(t) per threshold, across every explained (blocked) sample.
-- `alignment_histogram.png` — distribution of `injected_span_percentile` across the same samples.
+- `fidelity_acc_bars.png` — mean Fidelity(t)/acc@1(t) per threshold, across every explained sample.
+- `alignment_histogram.png` — distribution of `injected_top_mass_precision` (alignment, see [index](index.md)) across the same samples.
+- `confusion_matrix.png` — positive = malign, predicted malign = blocked, every run.
 
 The Markdown report ends with an ASR/Utility summary computed over the *entire* raw result (every dataset sample, not just the ones XAI explained) — the benchmark-level numbers the per-sample XAI metrics sit inside, split into overall / blocked / not-blocked — followed by a per-`category` breakdown (Fidelity/acc@1 at the largest requested threshold, plus ASR/Utility over the whole category) when the dataset provides a `category` field (e.g. `squad_v2`'s phishing/access-denial/content-promotion/infrastructure-failure labels); omitted entirely for datasets without one. Each `saliency_maps.html` sample header also names the category alongside the attack.
 
