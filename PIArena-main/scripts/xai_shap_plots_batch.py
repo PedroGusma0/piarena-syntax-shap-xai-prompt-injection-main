@@ -1,5 +1,6 @@
-"""Batch driver for xai_shap_plots_test.py: for every raw `*-kernelshap-42.json`
-under the `kernelshap_*` result folders, write `bar_global.png` and
+"""Batch driver for xai_shap_plots_test.py: for every raw `*-{xai-method}-42.json`
+(default kernelshap; `--xai-method ig` for Integrated Gradients) under the
+`{xai-method}_*` result folders, write `bar_global.png` and
 `saliency_bars.html` into `<json dir>/xai_metrics/plots/<stem>/`.
 
 Usage (from the repo root):
@@ -18,10 +19,10 @@ import xai_shap_plots_test as T  # noqa: E402
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 
 
-def discover(roots, only=None):
+def discover(roots, only=None, xai_method="kernelshap"):
     found = []
     for root in roots:
-        for f in glob.glob(os.path.join(glob.escape(root), "**", "*-kernelshap-42.json"), recursive=True):
+        for f in glob.glob(os.path.join(glob.escape(root), "**", f"*-{xai_method}-42.json"), recursive=True):
             rel = os.path.relpath(f, REPO_ROOT).replace(os.sep, "/")
             parts = rel.split("/")
             if "xai_metrics" in parts or "tmp_attack_results" in parts or f.endswith("_metrics.json"):
@@ -36,15 +37,17 @@ def discover(roots, only=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--roots", nargs="*", default=None, help="default: every kernelshap_* dir in the repo root")
+    ap.add_argument("--xai-method", default="kernelshap", choices=["kernelshap", "ig"],
+                    help="which result files to plot: *-{method}-42.json under {method}_* dirs")
+    ap.add_argument("--roots", nargs="*", default=None, help="default: every {xai-method}_* dir in the repo root")
     ap.add_argument("--only", default=None, help="substring filter on the relative path, e.g. dolly_closed_qa")
     ap.add_argument("--skip-existing", action="store_true")
     ap.add_argument("--top-k", type=int, default=15)
     ap.add_argument("--max-html-samples", type=int, default=None)
     args = ap.parse_args()
 
-    roots = args.roots or sorted(glob.glob(os.path.join(glob.escape(REPO_ROOT), "kernelshap_*")))
-    files = discover(roots, args.only)
+    roots = args.roots or sorted(glob.glob(os.path.join(glob.escape(REPO_ROOT), f"{args.xai_method}_*")))
+    files = discover(roots, args.only, args.xai_method)
     print(f"{len(files)} result file(s) found")
 
     summary = []

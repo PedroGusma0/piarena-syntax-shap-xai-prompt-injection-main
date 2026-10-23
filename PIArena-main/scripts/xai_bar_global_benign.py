@@ -27,13 +27,13 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 BLUE = "#008bfb"  # shap's own "negative" blue
-STEM_RE = re.compile(r"^(?P<dataset>.+?)-(?P<model>.+)-(?P<attack>[a-z_]+)-promptguard-kernelshap-42$")
+STEM_RE = re.compile(r"^(?P<dataset>.+?)-(?P<model>.+)-(?P<attack>[a-z_]+)-promptguard-(?:kernelshap|ig)-42$")
 
 
-def discover(roots, only=None):
+def discover(roots, only=None, xai_method="kernelshap"):
     found = []
     for root in roots:
-        for f in glob.glob(os.path.join(glob.escape(root), "**", "*-kernelshap-42.json"), recursive=True):
+        for f in glob.glob(os.path.join(glob.escape(root), "**", f"*-{xai_method}-42.json"), recursive=True):
             parts = os.path.relpath(f, REPO_ROOT).replace(os.sep, "/").split("/")
             if {"xai_metrics", "tmp_attack_results", "shap"} & set(parts) or f.endswith("_metrics.json"):
                 continue
@@ -97,15 +97,16 @@ def plot(agg, n_samples, out_path, top_k=20, min_count=5):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--roots", nargs="*", default=None, help="default: every kernelshap_* dir in the repo root")
+    ap.add_argument("--xai-method", default="kernelshap", choices=["kernelshap", "ig"])
+    ap.add_argument("--roots", nargs="*", default=None, help="default: every {xai-method}_* dir in the repo root")
     ap.add_argument("--only", default=None)
     ap.add_argument("--out-dir", default=os.path.join(REPO_ROOT, "figs", "bar_global_benign"))
     ap.add_argument("--top-k", type=int, default=20)
     ap.add_argument("--min-count", type=int, default=5)
     args = ap.parse_args()
 
-    roots = args.roots or sorted(glob.glob(os.path.join(glob.escape(REPO_ROOT), "kernelshap_*")))
-    files = discover(roots, args.only)
+    roots = args.roots or sorted(glob.glob(os.path.join(glob.escape(REPO_ROOT), f"{args.xai_method}_*")))
+    files = discover(roots, args.only, args.xai_method)
     print(f"{len(files)} result file(s)")
     for f in files:
         stem = os.path.splitext(os.path.basename(f))[0]

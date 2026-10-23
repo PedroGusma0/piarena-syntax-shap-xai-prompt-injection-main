@@ -77,7 +77,7 @@ from piarena.xai.metrics import (
     injected_top_mass_precision,
 )
 
-_XAI_METHODS = ("syntaxshap", "kernelshap")
+_XAI_METHODS = ("syntaxshap", "kernelshap", "ig")
 
 
 def parse_args():
@@ -96,7 +96,7 @@ def parse_args():
                          "fraction; the first is the one plotted in alignment_histogram.png.")
     p.add_argument("--algorithm", default="syntax", choices=["syntax", "shap"],
                     help="syntaxshap-only: tree-restricted ('syntax') vs. unrestricted ('shap') coalition "
-                         "enumeration. Ignored for --xai-method kernelshap.")
+                         "enumeration. Ignored for --xai-method kernelshap/ig.")
     p.add_argument("--thresholds", type=float, nargs="+", default=[0.1, 0.2, 0.3, 0.5])
     p.add_argument("--out-dir", default=None, help="Default: <result dir>/xai_metrics/")
     p.add_argument("--max-plot-samples", type=int, default=None,
@@ -180,7 +180,8 @@ def _load_explainer(xai_method: str, model_name: str, algorithm: str, trust_remo
 
         return explainer, make_rescorer
 
-    # kernelshap
+    # kernelshap / ig: both re-score through the kernelshap explainer's word-level
+    # masking (`make_rescorer`), which ClassifierIGExplainer inherits unchanged.
     from piarena.xai.kernelshap.classifier_explainer import ClassifierKernelExplainer
     from piarena.xai.kernelshap.xai_kernelshap import _load_classifier
 
@@ -370,7 +371,7 @@ def main():
             "defense": defense,
             "attack": attack,
             "alignment_masses": args.alignment_mass,
-            # None for kernelshap (algorithm only applies to syntaxshap's
+            # None for kernelshap/ig (algorithm only applies to syntaxshap's
             # coalition enumeration) rather than omitted, so downstream
             # consumers can rely on the key always being present.
             "algorithm": args.algorithm if xai_method == "syntaxshap" else None,

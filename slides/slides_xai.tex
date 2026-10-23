@@ -11,7 +11,7 @@
 \usepackage{adjustbox}
 \usepackage{amsmath}
 \usepackage{array}
-\graphicspath{{../figs/}{../figs/bar_global/}{../figs/bar_global_benign/}}
+\graphicspath{{../figs/}{../figs/bar_global/}{../figs/bar_global_benign/}{../figs/bar_global_n1/}}
 
 % posiciona qualquer conteúdo em coordenadas absolutas (fração da página, a partir do canto superior esquerdo)
 \newcommand{\figat}[4][north west]{%
@@ -134,6 +134,196 @@
 \end{frame}
 
 
+
+\begin{frame}{Termos mais frequentes}
+  \figat{0.0824}{0.215}{\parbox{0.84\paperwidth}{\color{white}\cifs{11}{14}\ciAzul{Dataset:} \texttt{dolly\_closed\_qa} \quad \ciAzul{Defesa:} \texttt{promptguard} \quad \ciAzul{Ataque:} \texttt{direct} \quad ($n=138$ amostras)}}
+  \figat{0.0824}{0.285}{\includegraphics[height=0.60\paperheight,width=0.35\paperwidth,keepaspectratio]{bar_global_n1_dolly_closed_qa.png}}
+  \figat{0.44}{0.30}{\parbox{0.50\paperwidth}{\color{white}\fontsize{8.5}{10.6}\selectfont
+    \ciAzul{Palavra e $|$SHAP$|$ médio }\\[3pt]
+    \renewcommand{\arraystretch}{1.05}\begin{tabular}{lrclr}
+      \texttt{integrate} & 0,516 & \hspace{8pt} & \texttt{add} & 0,280 \\
+      \texttt{imitate} & 0,511 & \hspace{8pt} & \texttt{explanation,} & 0,265 \\
+      \texttt{commence} & 0,424 & \hspace{8pt} & \texttt{begin} & 0,244 \\
+      \texttt{conclude} & 0,413 & \hspace{8pt} & \texttt{append} & 0,244 \\
+      \texttt{interject} & 0,405 & \hspace{8pt} & \texttt{embed} & 0,239 \\
+      \texttt{complement} & 0,365 & \hspace{8pt} & \texttt{insert} & 0,232 \\
+      \texttt{slip} & 0,349 & \hspace{8pt} & \texttt{enact} & 0,230 \\
+      \texttt{simulate} & 0,340 & \hspace{8pt} & \texttt{supplement} & 0,219 \\
+      \texttt{emulate} & 0,292 & \hspace{8pt} & \texttt{replying} & 0,215 \\
+      \texttt{discontinue} & 0,285 & \hspace{8pt} & \texttt{query,} & 0,201 \\
+    \end{tabular}}}
+\end{frame}
+
+\begin{frame}{Termos mais frequentes}
+  \figat{0.0824}{0.215}{\parbox{0.84\paperwidth}{\color{white}\cifs{11}{14}\ciAzul{Dataset:} \texttt{dolly\_information\_extraction} \quad \ciAzul{Defesa:} \texttt{promptguard} \quad \ciAzul{Ataque:} \texttt{direct} \quad ($n=129$ amostras)}}
+  \figat{0.0824}{0.285}{\includegraphics[height=0.60\paperheight,width=0.35\paperwidth,keepaspectratio]{bar_global_n1_dolly_information_extraction.png}}
+  \figat{0.44}{0.30}{\parbox{0.50\paperwidth}{\color{white}\fontsize{8.5}{10.6}\selectfont
+    \ciAzul{Palavra e $|$SHAP$|$ médio }\\[3pt]
+    \renewcommand{\arraystretch}{1.05}\begin{tabular}{lrclr}
+      \texttt{incorporate} & 0,532 & \hspace{8pt} & \texttt{append} & 0,268 \\
+      \texttt{ensure} & 0,377 & \hspace{8pt} & \texttt{interject} & 0,265 \\
+      \texttt{mid-respon...} & 0,371 & \hspace{8pt} & \texttt{pause} & 0,259 \\
+      \texttt{integrate} & 0,362 & \hspace{8pt} & \texttt{description,} & 0,259 \\
+      \texttt{emit} & 0,335 & \hspace{8pt} & \texttt{text,} & 0,256 \\
+      \texttt{prepend} & 0,315 & \hspace{8pt} & \texttt{sentence} & 0,255 \\
+      \texttt{weave} & 0,299 & \hspace{8pt} & \texttt{grammar,} & 0,249 \\
+      \texttt{answer,} & 0,283 & \hspace{8pt} & \texttt{add} & 0,246 \\
+      \texttt{discussion} & 0,278 & \hspace{8pt} & \texttt{scotland.} & 0,230 \\
+      \texttt{insert} & 0,274 & \hspace{8pt} & \texttt{lose.} & 0,230 \\
+    \end{tabular}}}
+\end{frame}
+
+\begin{frame}{Termos mais frequentes}
+  \figat{0.0824}{0.215}{\parbox{0.84\paperwidth}{\color{white}\cifs{11}{14}\ciAzul{Dataset:} \texttt{dolly\_summarization} \quad \ciAzul{Defesa:} \texttt{promptguard} \quad \ciAzul{Ataque:} \texttt{direct} \quad ($n=114$ amostras)}}
+  \figat{0.0824}{0.285}{\includegraphics[height=0.60\paperheight,width=0.35\paperwidth,keepaspectratio]{bar_global_n1_dolly_summarization.png}}
+  \figat{0.44}{0.30}{\parbox{0.50\paperwidth}{\color{white}\fontsize{8.5}{10.6}\selectfont
+    \ciAzul{Palavra e $|$SHAP$|$ médio }\\[3pt]
+    \renewcommand{\arraystretch}{1.05}\begin{tabular}{lrclr}
+      \texttt{interject} & 0,534 & \hspace{8pt} & \texttt{replace} & 0,284 \\
+      \texttt{summarise} & 0,396 & \hspace{8pt} & \texttt{comment} & 0,267 \\
+      \texttt{discontinue} & 0,350 & \hspace{8pt} & \texttt{answer} & 0,264 \\
+      \texttt{imitate} & 0,328 & \hspace{8pt} & \texttt{unlock} & 0,261 \\
+      \texttt{statement} & 0,325 & \hspace{8pt} & \texttt{compose} & 0,254 \\
+      \texttt{supplement} & 0,321 & \hspace{8pt} & \texttt{insert} & 0,249 \\
+      \texttt{initiate} & 0,303 & \hspace{8pt} & \texttt{persuasive} & 0,233 \\
+      \texttt{respond:} & 0,296 & \hspace{8pt} & \texttt{recommenda...} & 0,221 \\
+      \texttt{simulate} & 0,294 & \hspace{8pt} & \texttt{abort} & 0,221 \\
+      \texttt{respond} & 0,290 & \hspace{8pt} & \texttt{return:} & 0,219 \\
+    \end{tabular}}}
+\end{frame}
+
+\begin{frame}{Termos mais frequentes}
+  \figat{0.0824}{0.215}{\parbox{0.84\paperwidth}{\color{white}\cifs{11}{14}\ciAzul{Dataset:} \texttt{hotpotqa\_rag} \quad \ciAzul{Defesa:} \texttt{promptguard} \quad \ciAzul{Ataque:} \texttt{direct} \quad ($n=49$ amostras)}}
+  \figat{0.0824}{0.285}{\includegraphics[height=0.60\paperheight,width=0.35\paperwidth,keepaspectratio]{bar_global_n1_hotpotqa_rag.png}}
+  \figat{0.44}{0.30}{\parbox{0.50\paperwidth}{\color{white}\fontsize{8.5}{10.6}\selectfont
+    \ciAzul{Palavra e $|$SHAP$|$ médio }\\[3pt]
+    \renewcommand{\arraystretch}{1.05}\begin{tabular}{lrclr}
+      \texttt{interrupt} & 0,365 & \hspace{8pt} & \texttt{prepend} & 0,137 \\
+      \texttt{slip} & 0,306 & \hspace{8pt} & \texttt{imitate} & 0,136 \\
+      \texttt{comment} & 0,294 & \hspace{8pt} & \texttt{simulate} & 0,128 \\
+      \texttt{fold} & 0,246 & \hspace{8pt} & \texttt{emulate} & 0,122 \\
+      \texttt{append} & 0,246 & \hspace{8pt} & \texttt{answer,} & 0,120 \\
+      \texttt{men?} & 0,244 & \hspace{8pt} & \texttt{mimic} & 0,115 \\
+      \texttt{mid-respon...} & 0,178 & \hspace{8pt} & \texttt{reply.} & 0,113 \\
+      \texttt{incorporate} & 0,178 & \hspace{8pt} & \texttt{answer.} & 0,102 \\
+      \texttt{insert} & 0,165 & \hspace{8pt} & \texttt{add} & 0,102 \\
+      \texttt{these?} & 0,165 & \hspace{8pt} & \texttt{explanation,} & 0,093 \\
+    \end{tabular}}}
+\end{frame}
+
+\begin{frame}{Termos mais frequentes}
+  \figat{0.0824}{0.215}{\parbox{0.84\paperwidth}{\color{white}\cifs{11}{14}\ciAzul{Dataset:} \texttt{msmarco\_rag} \quad \ciAzul{Defesa:} \texttt{promptguard} \quad \ciAzul{Ataque:} \texttt{direct} \quad ($n=64$ amostras)}}
+  \figat{0.0824}{0.285}{\includegraphics[height=0.60\paperheight,width=0.35\paperwidth,keepaspectratio]{bar_global_n1_msmarco_rag.png}}
+  \figat{0.44}{0.30}{\parbox{0.50\paperwidth}{\color{white}\fontsize{8.5}{10.6}\selectfont
+    \ciAzul{Palavra e $|$SHAP$|$ médio}\\[3pt]
+    \renewcommand{\arraystretch}{1.05}\begin{tabular}{lrclr}
+      \texttt{override} & 0,381 & \hspace{8pt} & \texttt{completing} & 0,145 \\
+      \texttt{poe?} & 0,246 & \hspace{8pt} & \texttt{embed} & 0,143 \\
+      \texttt{summarize} & 0,243 & \hspace{8pt} & \texttt{office?} & 0,138 \\
+      \texttt{incorporate} & 0,218 & \hspace{8pt} & \texttt{comment} & 0,137 \\
+      \texttt{pre-response} & 0,211 & \hspace{8pt} & \texttt{encourage} & 0,136 \\
+      \texttt{osteen?} & 0,193 & \hspace{8pt} & \texttt{outputs} & 0,126 \\
+      \texttt{interrupt} & 0,191 & \hspace{8pt} & \texttt{answer,} & 0,119 \\
+      \texttt{a:} & 0,187 & \hspace{8pt} & \texttt{replying} & 0,118 \\
+      \texttt{append} & 0,149 & \hspace{8pt} & \texttt{checkpoint:} & 0,115 \\
+      \texttt{query,} & 0,147 & \hspace{8pt} & \texttt{trace:} & 0,115 \\
+    \end{tabular}}}
+\end{frame}
+
+\begin{frame}{Termos mais frequentes}
+  \figat{0.0824}{0.215}{\parbox{0.84\paperwidth}{\color{white}\cifs{11}{14}\ciAzul{Dataset:} \texttt{multi\_news\_long} \quad \ciAzul{Defesa:} \texttt{promptguard} \quad \ciAzul{Ataque:} \texttt{direct} \quad ($n=18$ amostras)}}
+  \figat{0.0824}{0.285}{\includegraphics[height=0.60\paperheight,width=0.35\paperwidth,keepaspectratio]{bar_global_n1_multi_news_long.png}}
+  \figat{0.44}{0.30}{\parbox{0.50\paperwidth}{\color{white}\fontsize{8.5}{10.6}\selectfont
+    \ciAzul{Palavra e $|$SHAP$|$ médio}\\[3pt]
+    \renewcommand{\arraystretch}{1.05}\begin{tabular}{lrclr}
+      \texttt{replace} & 0,253 & \hspace{8pt} & \texttt{concise} & 0,117 \\
+      \texttt{add} & 0,217 & \hspace{8pt} & \texttt{'error:} & 0,114 \\
+      \texttt{standard} & 0,216 & \hspace{8pt} & \texttt{insert} & 0,112 \\
+      \texttt{compose} & 0,208 & \hspace{8pt} & \texttt{respond} & 0,108 \\
+      \texttt{halt} & 0,201 & \hspace{8pt} & \texttt{unresponsi...} & 0,098 \\
+      \texttt{emulate} & 0,169 & \hspace{8pt} & \texttt{richest} & 0,094 \\
+      \texttt{sentence} & 0,151 & \hspace{8pt} & \texttt{studio} & 0,089 \\
+      \texttt{output} & 0,150 & \hspace{8pt} & \texttt{initiation} & 0,084 \\
+      \texttt{imitate} & 0,141 & \hspace{8pt} & \texttt{condition.} & 0,082 \\
+      \texttt{summarizing,} & 0,128 & \hspace{8pt} & \texttt{discreetly} & 0,082 \\
+    \end{tabular}}}
+\end{frame}
+
+\begin{frame}{Termos mais frequentes}
+  \figat{0.0824}{0.215}{\parbox{0.84\paperwidth}{\color{white}\cifs{11}{14}\ciAzul{Dataset:} \texttt{nq\_rag} \quad \ciAzul{Defesa:} \texttt{promptguard} \quad \ciAzul{Ataque:} \texttt{direct} \quad ($n=40$ amostras)}}
+  \figat{0.0824}{0.285}{\includegraphics[height=0.60\paperheight,width=0.35\paperwidth,keepaspectratio]{bar_global_n1_nq_rag.png}}
+  \figat{0.44}{0.30}{\parbox{0.50\paperwidth}{\color{white}\fontsize{8.5}{10.6}\selectfont
+    \ciAzul{Palavra e $|$SHAP$|$ médio}\\[3pt]
+    \renewcommand{\arraystretch}{1.05}\begin{tabular}{lrclr}
+      \texttt{craft} & 0,283 & \hspace{8pt} & \texttt{respond} & 0,121 \\
+      \texttt{insert} & 0,271 & \hspace{8pt} & \texttt{api} & 0,120 \\
+      \texttt{emulate} & 0,249 & \hspace{8pt} & \texttt{answer,} & 0,117 \\
+      \texttt{ensure} & 0,220 & \hspace{8pt} & \texttt{append} & 0,115 \\
+      \texttt{sentence} & 0,203 & \hspace{8pt} & \texttt{concise} & 0,110 \\
+      \texttt{simulate} & 0,194 & \hspace{8pt} & \texttt{answering,} & 0,110 \\
+      \texttt{reply,} & 0,194 & \hspace{8pt} & \texttt{teams,[when?} & 0,101 \\
+      \texttt{please} & 0,148 & \hspace{8pt} & \texttt{integrate} & 0,100 \\
+      \texttt{research?} & 0,131 & \hspace{8pt} & \texttt{respond,} & 0,096 \\
+      \texttt{slip} & 0,128 & \hspace{8pt} & \texttt{brief} & 0,094 \\
+    \end{tabular}}}
+\end{frame}
+
+\begin{frame}{Termos mais frequentes}
+  \figat{0.0824}{0.215}{\parbox{0.84\paperwidth}{\color{white}\cifs{11}{14}\ciAzul{Dataset:} \texttt{squad\_v2} \quad \ciAzul{Defesa:} \texttt{promptguard} \quad \ciAzul{Ataque:} \texttt{direct} \quad ($n=134$ amostras)}}
+  \figat{0.0824}{0.285}{\includegraphics[height=0.60\paperheight,width=0.35\paperwidth,keepaspectratio]{bar_global_n1_squad_v2.png}}
+  \figat{0.44}{0.30}{\parbox{0.50\paperwidth}{\color{white}\fontsize{8.5}{10.6}\selectfont
+    \ciAzul{Palavra e $|$SHAP$|$ médio}\\[3pt]
+    \renewcommand{\arraystretch}{1.05}\begin{tabular}{lrclr}
+      \texttt{disregard} & 0,618 & \hspace{8pt} & \texttt{incorporate} & 0,287 \\
+      \texttt{integrate} & 0,536 & \hspace{8pt} & \texttt{append} & 0,258 \\
+      \texttt{interrupt} & 0,377 & \hspace{8pt} & \texttt{generate} & 0,253 \\
+      \texttt{imitate} & 0,360 & \hspace{8pt} & \texttt{insert} & 0,248 \\
+      \texttt{emulate} & 0,358 & \hspace{8pt} & \texttt{answer,} & 0,227 \\
+      \texttt{interject} & 0,350 & \hspace{8pt} & \texttt{context,} & 0,222 \\
+      \texttt{simulate} & 0,340 & \hspace{8pt} & \texttt{terminate} & 0,220 \\
+      \texttt{conclude} & 0,320 & \hspace{8pt} & \texttt{begin} & 0,220 \\
+      \texttt{ensure} & 0,315 & \hspace{8pt} & \texttt{mimic} & 0,216 \\
+      \texttt{mid-respon...} & 0,292 & \hspace{8pt} & \texttt{message:} & 0,214 \\
+    \end{tabular}}}
+\end{frame}
+
+\begin{frame}{Termos mais frequentes}
+  \figat{0.0824}{0.215}{\parbox{0.84\paperwidth}{\color{white}\cifs{11}{14}\ciAzul{Dataset:} \texttt{dolly\_closed\_qa} \quad \ciAzul{Defesa:} \texttt{piguard} \quad \ciAzul{Ataque:} \texttt{direct} \quad ($n=200$ amostras)}}
+  \figat{0.0824}{0.285}{\includegraphics[height=0.60\paperheight,width=0.35\paperwidth,keepaspectratio]{bar_global_n1_dolly_closed_qa_piguard.png}}
+  \figat{0.44}{0.30}{\parbox{0.50\paperwidth}{\color{white}\fontsize{8.5}{10.6}\selectfont
+    \ciAzul{Palavra e $|$SHAP$|$ médio }\\[3pt]
+    \renewcommand{\arraystretch}{1.05}\begin{tabular}{lrclr}
+      \texttt{step,} & 0,277 & \hspace{8pt} & \texttt{draft.} & 0,147 \\
+      \texttt{queries,} & 0,233 & \hspace{8pt} & \texttt{response,} & 0,147 \\
+      \texttt{description,} & 0,177 & \hspace{8pt} & \texttt{'https://u...} & 0,146 \\
+      \texttt{'https://u...} & 0,174 & \hspace{8pt} & \texttt{disturbance} & 0,145 \\
+      \texttt{hamlet".} & 0,167 & \hspace{8pt} & \texttt{seamlessly} & 0,143 \\
+      \texttt{history:} & 0,163 & \hspace{8pt} & \texttt{answer,} & 0,133 \\
+      \texttt{"write} & 0,154 & \hspace{8pt} & \texttt{lipetsk} & 0,132 \\
+      \texttt{position,} & 0,150 & \hspace{8pt} & \texttt{geschwader} & 0,129 \\
+      \texttt{girls".} & 0,149 & \hspace{8pt} & \texttt{your} & 0,129 \\
+      \texttt{antwoord} & 0,149 & \hspace{8pt} & \texttt{lines,} & 0,127 \\
+    \end{tabular}}}
+\end{frame}
+
+\begin{frame}{Termos mais frequentes}
+  \figat{0.0824}{0.215}{\parbox{0.84\paperwidth}{\color{white}\cifs{11}{14}\ciAzul{Dataset:} \texttt{squad\_v2} \quad \ciAzul{Defesa:} \texttt{piguard} \quad \ciAzul{Ataque:} \texttt{direct} \quad ($n=200$ amostras)}}
+  \figat{0.0824}{0.285}{\includegraphics[height=0.60\paperheight,width=0.35\paperwidth,keepaspectratio]{bar_global_n1_squad_v2_piguard.png}}
+  \figat{0.44}{0.30}{\parbox{0.50\paperwidth}{\color{white}\fontsize{8.5}{10.6}\selectfont
+    \ciAzul{Palavra e $|$SHAP$|$ médio }\\[3pt]
+    \renewcommand{\arraystretch}{1.05}\begin{tabular}{lrclr}
+      \texttt{step,} & 0,344 & \hspace{8pt} & \texttt{observer.} & 0,148 \\
+      \texttt{note,} & 0,230 & \hspace{8pt} & \texttt{tours,} & 0,146 \\
+      \texttt{replying,} & 0,205 & \hspace{8pt} & \texttt{signal.} & 0,146 \\
+      \texttt{responding,} & 0,199 & \hspace{8pt} & \texttt{answering.} & 0,141 \\
+      \texttt{controversy.} & 0,198 & \hspace{8pt} & \texttt{reply,} & 0,140 \\
+      \texttt{additional...} & 0,198 & \hspace{8pt} & \texttt{interject} & 0,140 \\
+      \texttt{response,} & 0,191 & \hspace{8pt} & \texttt{schedule.} & 0,138 \\
+      \texttt{reply.} & 0,191 & \hspace{8pt} & \texttt{integrate} & 0,136 \\
+      \texttt{directive:} & 0,162 & \hspace{8pt} & \texttt{resolution.} & 0,134 \\
+      \texttt{https://eu...} & 0,156 & \hspace{8pt} & \texttt{2014[updat...} & 0,133 \\
+    \end{tabular}}}
+\end{frame}
 
 % ============================================================ 5. RESULTADOS
 \begin{frame}{Prompts fora da curva}

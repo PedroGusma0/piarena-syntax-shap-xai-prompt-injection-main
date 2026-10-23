@@ -157,7 +157,7 @@ def main(args):
 
     # Instantiate XAI method (opt-in; None unless --xai is passed)
     xai_config = args.xai_config
-    if args.xai == "kernelshap":
+    if args.xai in ("kernelshap", "ig"):
         # Explain the classifier the defense actually uses (e.g. PIGuard for
         # --defense piguard), not the plugin's default model; an explicit
         # `model_name` in xai_config still wins.

@@ -38,7 +38,7 @@ def _clean(tok: str) -> str:
     return t if t else "·"
 
 
-_XAI_METHODS = ("syntaxshap", "kernelshap")
+_XAI_METHODS = ("syntaxshap", "kernelshap", "ig")
 
 
 def _defense_from_filename(path):
@@ -170,7 +170,7 @@ def write_saliency_bars_html(data, local_dir, top_k=15, max_samples=None):
 
 
 # --------------------------------------------------------------- global plots
-def plot_bar_global(data, out_dir, top_k=20, min_count=5):
+def plot_bar_global(data, out_dir, top_k=20, min_count=5, filename="bar_global.png"):
     agg = defaultdict(list)
     for d in data.values():
         for t, v in zip(d["tokens"], d["values"]):
@@ -183,7 +183,7 @@ def plot_bar_global(data, out_dir, top_k=20, min_count=5):
     plt.figure()
     shap.plots.bar(e, max_display=top_k, show=False)
     plt.title(f"{defense_label(data)} — mean |SHAP| per token (n>={min_count}, {len(data)} explained samples)", fontsize=9)
-    _save(os.path.join(out_dir, "bar_global.png"))
+    _save(os.path.join(out_dir, filename))
 
 
 def main():
@@ -214,7 +214,9 @@ def main():
     if errs:
         print(f"additivity |base+sum-full|: max={max(errs):.2e} mean={np.mean(errs):.2e}")
 
-    _try("bar_global", lambda: plot_bar_global(data, local_dir, min_count=args.min_count))
+    _try("bar_global", lambda: plot_bar_global(
+        data, local_dir, min_count=args.min_count,
+        filename="bar_global.png" if args.min_count == 5 else f"bar_global_n{args.min_count}.png"))
     _try("html", lambda: write_saliency_bars_html(data, local_dir, args.top_k, args.max_html_samples))
 
 

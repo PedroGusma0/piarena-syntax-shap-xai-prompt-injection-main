@@ -27,11 +27,13 @@ python main.py --dataset squad_v2 --attack direct --defense promptguard --xai sy
 - [SyntaxSHAP](syntaxshap.md) — syntax-tree-restricted Shapley values, adapted from the SyntaxSHAP paper for text-classification defenses (currently `promptguard`).
 - [Kernel SHAP](kernelshap.md) — `captum.attr.KernelShap`/`shap.KernelExplainer`-based word-level Shapley values, for text-classification defenses (currently `promptguard`).
 
-Both coexist in the same `XAI_REGISTRY` and share the identical `xai_result` output contract (tokens/values/base_value/full_value/injected_span) and the same `scripts/xai_metrics.py` analysis tooling below — switching between them is a `--xai` flag, not a different pipeline.
+- [Integrated Gradients](ig.md) — `captum.attr.LayerIntegratedGradients` over the classifier's embeddings (white-box, fixed `n_steps` cost, word-aligned values; not exactly additive).
+
+All coexist in the same `XAI_REGISTRY` and share the identical `xai_result` output contract (tokens/values/base_value/full_value/injected_span) and the same `scripts/xai_metrics.py` analysis tooling below — switching between them is a `--xai` flag, not a different pipeline.
 
 ## Analysis Tooling
 
-`scripts/xai_metrics.py` computes faithfulness metrics (Fidelity(t), acc@1, alignment with the injected span) from a `--xai` result file, and renders `shap`-library saliency maps (`shap.plots.text`/`shap.plots.bar`). It infers which method produced a given result file from its filename (`--xai-method auto`, the default) — see [SyntaxSHAP](syntaxshap.md)/`plans/xai-syntaxshap-promptguard.md` and [Kernel SHAP](kernelshap.md)/`plans/xai-kernelshap-promptguard.md` for the full design of each.
+`scripts/xai_metrics.py` computes faithfulness metrics (Fidelity(t), acc@1, alignment with the injected span) from a `--xai` result file, and renders `shap`-library saliency maps (`shap.plots.text`/`shap.plots.bar`). It infers which method produced a given result file from its filename (`--xai-method auto`, the default) — see [SyntaxSHAP](syntaxshap.md)/`plans/xai-syntaxshap-promptguard.md` and [Kernel SHAP](kernelshap.md)/`plans/xai-kernelshap-promptguard.md` and [Integrated Gradients](ig.md)/`plans/xai-ig-promptguard.md` for the full design of each.
 
 ## `--attack none` (benign-only run)
 

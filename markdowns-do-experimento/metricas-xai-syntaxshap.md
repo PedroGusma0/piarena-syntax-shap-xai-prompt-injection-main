@@ -101,3 +101,7 @@ Havia uma sexta métrica (`trigger_word_ranks`, no `metrics.py`, e um bloco `sem
 | ~~spearman (syntax vs. syntax-w)~~ | ~~—~~ | removida — `algorithm="syntax-w"` foi tirado do código; só resta `"syntax"`, sem segunda variante pra comparar |
 | ~~trigger-word ranks~~ | ~~—~~ | removida (redundante com injected_span_percentile) |
 | Coherency (Seção 5.3) | — | não portado (precisa de pares de sentenças perturbadas, ainda não gerados) |
+
+## Nota: Integrated Gradients
+
+Fidelity(t), acc@1 e alinhamento com o span valem também para resultados de `--xai ig`: usam só `values`, `full_value` e `injected_span`, e a re-pontuação passa pelo `make_rescorer` do KernelSHAP (mascaramento por palavra), inalterado. `xai_metrics.py` infere `ig` pelo token `-ig-` do nome do arquivo. Ver [[ig-adaptacao-encoder-classifier]].
