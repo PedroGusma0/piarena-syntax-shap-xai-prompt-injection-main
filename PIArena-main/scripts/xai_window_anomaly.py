@@ -148,7 +148,8 @@ def main():
     ap.add_argument("--idx", type=int, nargs="*", default=None, help="indices das amostras (padrao: as primeiras)")
     ap.add_argument("--max-samples", type=int, default=5)
     ap.add_argument("--with-shap", action="store_true", help="figura extra: top palavras por φ na janela de maior P(malign)")
-    ap.add_argument("--out-dir", type=Path, default=ROOT.parent / "figs" / "window_anomaly")
+    ap.add_argument("--out-dir", type=Path, default=None,
+                    help="default: <result dir>/xai_metrics/plots/<result stem>/window_anomaly")
     args = ap.parse_args()
 
     result = json.load(open(args.result, encoding="utf-8"))
@@ -157,7 +158,7 @@ def main():
     dataset = guess_dataset(args.result)
     prefix = attack_prefix(attack)
     idxs = [str(i) for i in args.idx] if args.idx else [i for i in result][: args.max_samples]
-    out_dir = args.out_dir / dataset
+    out_dir = args.out_dir or (args.result.parent / "xai_metrics" / "plots" / args.result.stem / "window_anomaly")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     for idx in idxs:

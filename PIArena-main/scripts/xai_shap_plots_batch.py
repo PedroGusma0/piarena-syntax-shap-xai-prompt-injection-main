@@ -72,7 +72,10 @@ def main():
             os.makedirs(out, exist_ok=True)
             T.plot_bar_global(data, out)
             T.plot_bar_global(data, out, min_count=1, filename="bar_global_n1.png")
-            T.write_saliency_bars_html(data, out, args.top_k, args.max_html_samples)
+            if T._is_windowed_result(f):
+                print("  windowed run: skipping saliency_bars.html (use xai_window_saliency.py)")
+            else:
+                T.write_saliency_bars_html(data, out, args.top_k, args.max_html_samples)
             summary.append((f"ok ({len(data)} samples, {time.time() - t0:.0f}s)", label))
         except Exception as e:  # keep going across files
             T.plt.close("all")

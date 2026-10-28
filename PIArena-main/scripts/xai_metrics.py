@@ -99,6 +99,9 @@ def parse_args():
                          "enumeration. Ignored for --xai-method kernelshap/ig.")
     p.add_argument("--thresholds", type=float, nargs="+", default=[0.1, 0.2, 0.3, 0.5])
     p.add_argument("--out-dir", default=None, help="Default: <result dir>/xai_metrics/")
+    p.add_argument("--no-window-plots", action="store_true",
+                   help="Windowed results only: skip the per-window plots (window_anomaly, window_saliency, "
+                        "bar_global_n1, fig9_frequency) that this script otherwise also generates.")
     p.add_argument("--max-plot-samples", type=int, default=None,
                     help="Cap on samples rendered into saliency_maps.html. Default: no cap "
                          "(renders every blocked/explained sample) -- pass e.g. 25 to keep the file small.")
@@ -394,6 +397,43 @@ def _main_windowed(args, result: dict, stem: str, out_dir: str):
         f.write("\n".join(lines))
     print(f"Wrote {report_path}")
     print("\n".join(lines))
+
+    if not getattr(args, "no_window_plots", False):
+        _render_window_plots(args.result, out_dir, stem, args.max_plot_samples)
+
+
+def _render_window_plots(result_path: str, out_dir: str, stem: str, max_samples: int):
+    """Runs the per-window plot scripts for a windowed result, all writing under
+    `<out_dir>/plots/<stem>/`: window_anomaly (P(malign) bars with [INJ]/[BLOQUEIO]),
+    window_saliency (one saliency map per window), bar_global_n1, fig9_frequency.
+    Each runs in its own process, so one failing (e.g. no sample was blocked, so no
+    XAI values) never hides the others."""
+    import subprocess
+    import sys
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    plots_dir = os.path.join(out_dir, "plots", stem)
+    result_dir = os.path.dirname(os.path.abspath(result_path))
+    py = sys.executable
+    n = str(max_samples if max_samples else 5)  # --max-plot-samples unset -> 5 samples
+    jobs = [
+        ("window_anomaly", [py, os.path.join(here, "xai_window_anomaly.py"), "--result", result_path, "--max-samples", n,
+                            "--out-dir", os.path.join(plots_dir, "window_anomaly")]),
+        ("window_saliency", [py, os.path.join(here, "xai_window_saliency.py"), "--result", result_path, "--max-samples", n,
+                             "--out-dir", os.path.join(plots_dir, "window_saliency")]),
+        ("bar_global_n1", [py, os.path.join(here, "xai_shap_plots_test.py"), "--result", result_path, "--min-count", "1",
+                           "--out-dir", out_dir]),
+        ("fig9_frequency", [py, os.path.join(here, "xai_fig9_frequency.py"), "--roots", result_dir, "--only", stem,
+                            "--out-dir", os.path.join(plots_dir, "fig9_frequency")]),
+    ]
+    for name, cmd in jobs:
+        print(f"[plots] {name} ...")
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        tail = (proc.stdout.strip().splitlines() or [""])[-1]
+        if proc.returncode != 0:
+            print(f"[plots] {name} FAILED: {(proc.stderr.strip().splitlines() or [''])[-1]}")
+        else:
+            print(f"[plots] {name} ok: {tail}")
 
 
 def main():

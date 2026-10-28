@@ -129,14 +129,15 @@ def main():
     ap.add_argument("--idx", type=int, nargs="*", default=None)
     ap.add_argument("--max-samples", type=int, default=5)
     ap.add_argument("--windows", choices=["flagged", "injected", "flagged+injected", "all"], default="flagged+injected")
-    ap.add_argument("--out-dir", type=Path, default=ROOT.parent / "figs" / "window_saliency")
+    ap.add_argument("--out-dir", type=Path, default=None,
+                    help="default: <result dir>/xai_metrics/plots/<result stem>/window_saliency")
     args = ap.parse_args()
 
     result = json.load(open(args.result, encoding="utf-8"))
     parts = _parts(args.result)
     dataset = parts[0]
     attack = next((p for p in parts if p in _ATTACKS), "attack")
-    out_dir = args.out_dir / dataset / attack
+    out_dir = args.out_dir or (args.result.parent / "xai_metrics" / "plots" / args.result.stem / "window_saliency")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if args.idx:

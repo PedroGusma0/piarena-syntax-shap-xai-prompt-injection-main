@@ -2,9 +2,10 @@
 # Prompt-Guard em janelas de 512 tokens (--defense promptguard_windowed: bloqueia se
 # QUALQUER janela tiver P(malign) >= 0,5) + Kernel SHAP (captum) em TODAS as janelas,
 # para os ataques direct, ignore, completion e combined em qasper_long.
-# Ao final de cada run: metricas por janela, grafico de anomalia por janela
-# (com rotulos [INJ]/[BLOQUEIO]), mapa de saliencia por janela e bar_global_n1; depois
-# o fig9_frequency agregando os 4 ataques.
+# Ao final de cada run, xai_metrics.py gera as metricas por janela e, em
+# <resultado>/xai_metrics/plots/<arquivo>/: window_anomaly (rotulos [INJ]/[BLOQUEIO]),
+# window_saliency (um mapa por janela), bar_global_n1 e fig9_frequency; no fim, o
+# fig9_frequency agregando os 4 ataques (figs/fig9_frequency/).
 # Plano: plans/xai-promptguard-512-windows.md
 set -euo pipefail
 
@@ -33,9 +34,6 @@ for ATTACK in direct ignore completion combined; do
 
   RESULT="results/evaluation_results/${NAME}/${DATASET}-${BACKEND_LLM//\//-}-${ATTACK}-${DEFENSE}-${XAI}-${SEED}.json"
   python scripts/xai_metrics.py --result "$RESULT" --no-wandb
-  python scripts/xai_window_anomaly.py --result "$RESULT" --max-samples 5
-  python scripts/xai_window_saliency.py --result "$RESULT" --max-samples 5
-  python scripts/xai_shap_plots_test.py --result "$RESULT" --min-count 1
 done
 
 python scripts/xai_fig9_frequency.py --roots "results/evaluation_results/${NAME}"

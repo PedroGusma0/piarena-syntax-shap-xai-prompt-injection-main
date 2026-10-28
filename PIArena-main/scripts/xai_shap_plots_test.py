@@ -94,6 +94,13 @@ def load_blocked(path, include_unblocked=True, window_scope="flagged"):
     return out
 
 
+def _is_windowed_result(path):
+    """True if the result file comes from a windowed run (promptguard_windowed + window_tokens)."""
+    with open(path, encoding="utf-8") as f:
+        result = json.load(f)
+    return any(((s.get("xai_result") or {}).get("context") or {}).get("windowed") for s in result.values())
+
+
 def defense_label(data):
     """'piguard (leolee99/PIGuard)'-style label for titles, from the first sample."""
     first = next(iter(data.values()), {})
@@ -205,6 +212,9 @@ def main():
     ap.add_argument("--window-scope", choices=["all", "flagged", "injected"], default="flagged",
                     help="Only for windowed runs (promptguard_windowed): which windows feed the ranking: "
                          "flagged (P(malign) >= threshold, default) | injected | all.")
+    ap.add_argument("--html", action="store_true",
+                    help="Force saliency_bars.html even for windowed runs (off by default there: use "
+                         "scripts/xai_window_saliency.py, one saliency map per window).")
     args = ap.parse_args()
 
     stem = os.path.splitext(os.path.basename(args.result))[0]
@@ -226,7 +236,11 @@ def main():
     _try("bar_global", lambda: plot_bar_global(
         data, local_dir, min_count=args.min_count,
         filename="bar_global.png" if args.min_count == 5 else f"bar_global_n{args.min_count}.png"))
-    _try("html", lambda: write_saliency_bars_html(data, local_dir, args.top_k, args.max_html_samples))
+    windowed = _is_windowed_result(args.result)
+    if windowed and not args.html:
+        print("windowed run: skipping saliency_bars.html (see scripts/xai_window_saliency.py for per-window saliency maps)")
+    else:
+        _try("html", lambda: write_saliency_bars_html(data, local_dir, args.top_k, args.max_html_samples))
 
 
 if __name__ == "__main__":
