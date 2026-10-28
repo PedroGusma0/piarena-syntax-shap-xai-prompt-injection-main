@@ -102,7 +102,26 @@ Samples the defense did **not** block get `xai_result: null` — no explanation 
 - `max_n_samples` (default `20000`) — safety cap on the resolved `n_samples`.
 - `perturbations_per_eval` (default `8`) — batch size for scoring sampled coalitions: captum's own native batching knob for that backend, and the chunk size used internally to batch the `shap` backend's `f(X)`.
 - `baseline_token` (default `"mask"`) — which special token stands in for a "missing" word (`"mask"` | `"pad"` | `"unk"`, falls back through that order if the preferred one isn't defined on the tokenizer). This is a fixed reference value, not a sampled background distribution.
+- `window_tokens` (default `None`) — see "Windowed explanation" above; set by `--window_tokens`.
 - `max_length` (default `None`) — truncation length. `None` (the default) means **no truncation**: `context` is scored in full, matching `PromptGuardDefense.execute`'s own untruncated scoring (it calls the HF `pipeline` with no truncation kwarg at all). Set an explicit int only to bound cost for very long contexts — this is an opt-in accuracy/cost tradeoff, since a truncated explanation may no longer cover the same text the defense actually saw if the injected task falls past the cutoff; using it logs a warning. An explicit value is still guarded against the tokenizer's own absurd `model_max_length` sentinel default.
+
+## Windowed explanation (`window_tokens`)
+
+With `window_tokens` set (CLI: `--window_tokens 512`, which also configures `--defense promptguard_windowed`), the context is split into windows of that many tokens (same split as the defense, `piarena/windowing.py`) and **one independent Kernel SHAP game runs per window**; each window's values explain *that window's* P(malign), not a document-level score (they don't sum to one). VRAM then depends on the window (~0.2 GB at B=2 for 512 tokens) instead of the full context length (quadratic: ~10 GB at 6k tokens, ~110 GB at 20k).
+
+`xai_result["windows"]` holds, per window: `window_idx`, `char_start`, `char_end`, `tokens`, `values`, `base_value`, `full_value`, `p_malign`, `p_benign`, `predicted_label`, `n_samples`, `n_words`, `contains_injection` and `injected_span` (word indices within the window). `xai_result["context"]` is kept as a flat view (tokens/values concatenated, `p_malign` = max over windows, global `injected_span`) with `windowed: true`, so scripts that only read the flat view keep working; global Fidelity/acc@1 do not apply to it.
+
+Analysis for windowed runs:
+
+```bash
+python scripts/xai_metrics.py --result <json>            # detection / localization_acc@1 / false-flag window rate (no GPU)
+python scripts/xai_window_anomaly.py --result <json>      # bars of P(malign) per window, [INJ] / [BLOQUEIO] labels
+python scripts/xai_window_saliency.py --result <json>     # one word-level saliency map per window
+python scripts/xai_shap_plots_test.py --result <json> --min-count 1   # bar_global_n1 (--window-scope flagged|injected|all)
+python scripts/xai_fig9_frequency.py --roots <result dir>             # fig9_frequency (--window-scope ...)
+```
+
+Ready-made runs: `scripts/run_kernelshap_win512_{lcc_long,passage_retrieval_en_long,qasper_long,hotpotqa_long}.sh`. Design: `plans/xai-promptguard-512-windows.md`.
 
 ## Analysis
 

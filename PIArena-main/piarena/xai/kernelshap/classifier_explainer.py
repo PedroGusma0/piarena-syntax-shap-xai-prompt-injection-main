@@ -99,6 +99,7 @@ class ClassifierKernelExplainer:
         perturbations_per_eval: int = 8,
         max_length: Optional[int] = None,
         backend: str = "captum",
+        window_tokens: Optional[int] = None,
     ):
         """
         Parameters
@@ -134,6 +135,10 @@ class ClassifierKernelExplainer:
             (official `shap.KernelExplainer`) — which library actually solves
             the Shapley regression. The two coexist and produce the same
             output contract; switch via config, not by editing this file.
+        window_tokens : if set (e.g. 512), `explain_windows` splits `context`
+            into windows of this many tokens (`piarena.windowing`, the same
+            split `promptguard_windowed` uses) and runs one independent Kernel
+            SHAP game per window. `None` keeps the whole-context behavior.
         """
         if not getattr(tokenizer, "is_fast", False):
             raise RuntimeError(
@@ -150,6 +155,7 @@ class ClassifierKernelExplainer:
         self.max_n_samples = max_n_samples
         self.perturbations_per_eval = perturbations_per_eval
         self.backend = backend
+        self.window_tokens = window_tokens
 
         # `max_length=None` (the default, i.e. no explicit request) means NO
         # truncation — `_tokenize_content` must score exactly the same
@@ -548,25 +554,129 @@ class ClassifierKernelExplainer:
 
         result["injected_span"] = None
         if injected_task and result["tokens"]:
-            prefix = _attack_prefixes().get(attack_name, "") if attack_name else ""
-            char_start = context.find(prefix + injected_task) if prefix else -1
-            if char_start != -1:
-                char_end = char_start + len(prefix) + len(injected_task)
-            else:
-                # Either no known prefix for this attack, or the prefixed
-                # form wasn't found (e.g. a cached injected_context from a
-                # different attack_name) — fall back to bare injected_task,
-                # the original (never-regressing) behavior.
-                char_start = context.find(injected_task)
-                char_end = char_start + len(injected_task) if char_start != -1 else -1
-            if char_start != -1:
+            injection = self._locate_injection(context, injected_task, attack_name)
+            if injection is not None:
                 # Reuse the feature_mask/content_offsets `_explain_text` already
                 # computed above — no need to re-tokenize `context` a second time.
-                touched = [
-                    fid for fid, (a, b) in zip(feature_mask.tolist(), content_offsets)
-                    if b > a and a < char_end and b > char_start
-                ]
-                if touched:
-                    result["injected_span"] = {"start_token": min(touched), "end_token": max(touched) + 1}
+                result["injected_span"] = self._word_span(feature_mask, content_offsets, *injection)
 
         return result
+
+    @staticmethod
+    def _locate_injection(context: str, injected_task: str, attack_name: Optional[str]):
+        """Character range `(start, end)` of the injected task in `context`, or None.
+
+        `attack_name` lets the lookup account for the fixed prefix a heuristic
+        attack prepends to `injected_task` (see `_attack_prefixes()`); without
+        it (or for an attack with no known prefix, e.g. an optimization-based
+        one), or when the prefixed form isn't found (e.g. a cached
+        injected_context from a different attack_name), it falls back to the
+        bare `injected_task`, the original (never-regressing) behavior."""
+        prefix = _attack_prefixes().get(attack_name, "") if attack_name else ""
+        char_start = context.find(prefix + injected_task) if prefix else -1
+        if char_start != -1:
+            return char_start, char_start + len(prefix) + len(injected_task)
+        char_start = context.find(injected_task)
+        if char_start != -1:
+            return char_start, char_start + len(injected_task)
+        return None
+
+    @staticmethod
+    def _word_span(feature_mask, content_offsets, char_start: int, char_end: int):
+        """`{"start_token", "end_token"}` (word indices) of the words touching
+        the character range, or None if none do."""
+        touched = [
+            fid for fid, (a, b) in zip(feature_mask.tolist(), content_offsets)
+            if b > a and a < char_end and b > char_start
+        ]
+        if not touched:
+            return None
+        return {"start_token": min(touched), "end_token": max(touched) + 1}
+
+    def explain_windows(
+        self, context: str, injected_task: Optional[str] = None, attack_name: Optional[str] = None,
+        progress: bool = False,
+    ) -> dict:
+        """Explain `context` window by window: one independent Kernel SHAP game
+        per `self.window_tokens`-token window (same split as the
+        `promptguard_windowed` defense, `piarena.windowing`).
+
+        Each window's values explain *that window's* P(malign) — not the
+        P(malign) of the whole context — so they do not sum to a document-level
+        score. Returns a dict with:
+
+        * `windows`: one entry per window — `window_idx`, `char_start`,
+          `char_end`, the `_explain_text` fields (`tokens`, `values`,
+          `base_value`, `full_value`, `p_malign`, `p_benign`,
+          `predicted_label`, `n_samples`, `n_words`), `contains_injection`
+          and `injected_span` (word indices *within the window*).
+        * a flat view with the same keys `explain_context` returns (`tokens`
+          and `values` concatenated over windows, global-word-index
+          `injected_span`, `p_malign`/`full_value` = max over windows,
+          `predicted_label`/`base_value` of that window), plus `windowed: True`,
+          so scripts that only read the flat view keep working.
+        """
+        from ...windowing import split_into_windows, overlaps
+
+        if not self.window_tokens:
+            raise ValueError("explain_windows requires window_tokens to be set.")
+        windows = split_into_windows(self.tokenizer, context, self.window_tokens)
+        injection = self._locate_injection(context, injected_task, attack_name) if injected_task else None
+
+        entries = []
+        word_offset = 0
+        global_span = None
+        for w in windows:
+            text = context[w["char_start"]:w["char_end"]]
+            if progress:
+                print(f"[kernelshap:{self.backend}] window {w['idx'] + 1}/{len(windows)} "
+                      f"(chars {w['char_start']}-{w['char_end']})")
+            res = self._explain_text(text, progress=progress)
+            feature_mask = res["_feature_mask"]
+            content_offsets = res["_content_offsets"]
+            for key in self._PRIVATE_KEYS:
+                res.pop(key, None)
+
+            contains = bool(injection) and overlaps(w, *injection)
+            span = None
+            if contains and res["tokens"]:
+                span = self._word_span(
+                    feature_mask, content_offsets,
+                    max(injection[0] - w["char_start"], 0), injection[1] - w["char_start"],
+                )
+            if span is not None:
+                lo, hi = span["start_token"] + word_offset, span["end_token"] + word_offset
+                global_span = (
+                    {"start_token": lo, "end_token": hi} if global_span is None
+                    else {"start_token": min(global_span["start_token"], lo),
+                          "end_token": max(global_span["end_token"], hi)}
+                )
+            entries.append({
+                "window_idx": w["idx"],
+                "char_start": w["char_start"],
+                "char_end": w["char_end"],
+                **res,
+                "contains_injection": contains,
+                "injected_span": span,
+                "word_offset": word_offset,
+            })
+            word_offset += res["n_words"]
+
+        top = max(entries, key=lambda e: e["p_malign"])
+        flat = {
+            "windowed": True,
+            "window_tokens": self.window_tokens,
+            "n_windows": len(entries),
+            "tokens": [t for e in entries for t in e["tokens"]],
+            "values": [v for e in entries for v in e["values"]],
+            "base_value": top["base_value"],
+            "full_value": top["full_value"],
+            "p_malign": top["p_malign"],
+            "p_benign": top["p_benign"],
+            "predicted_label": top["predicted_label"],
+            "backend": self.backend,
+            "n_samples": sum(e["n_samples"] or 0 for e in entries),
+            "n_words": word_offset,
+            "injected_span": global_span,
+        }
+        return {"flat": flat, "windows": entries}

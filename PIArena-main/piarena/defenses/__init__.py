@@ -8,6 +8,7 @@ from .pisanitizer import defense_pisanitizer  # noqa: F401
 from .datasentinel import defense_datasentinel  # noqa: F401
 from .attentiontracker import defense_attentiontracker  # noqa: F401
 from .promptguard import defense_promptguard  # noqa: F401
+from .promptguard import defense_promptguard_windowed  # noqa: F401
 from .promptlocate import defense_promptlocate  # noqa: F401
 from .promptarmor import defense_promptarmor  # noqa: F401
 from .datafilter import defense_datafilter  # noqa: F401

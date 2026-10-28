@@ -21,16 +21,24 @@ class IntegratedGradientsXAI(BaseXAI):
         # `--attack none`) | "blocked" | "all". See `BaseXAI.should_explain`.
         "explain_scope": "auto",
         "explain_targets": ["context"],
-        # Number of interpolation steps along the baseline -> input path. Higher
-        # = smaller convergence delta (the target saturates near P(malign)=1,
-        # so a coarse path can miss the sharp transition).
-        "n_steps": 50,
+        # Starting number of interpolation steps along the baseline -> input
+        # path. If the convergence error exceeds `delta_tol` (relative to
+        # full_value - base_value) the steps are doubled and IG re-run, up to
+        # `max_n_steps` (None = fixed n_steps). Real squad_v2 runs with 50 fixed
+        # steps on P(malign) gave sum(values) ~ 0.005 against a gap of ~1.0.
+        "n_steps": 100,
+        "max_n_steps": 800,
+        "delta_tol": 0.05,
         # How many interpolation steps captum runs per forward/backward call
         # (memory knob; does not change the result).
         "internal_batch_size": 4,
         # captum's integral approximation: "gausslegendre" | "riemann_right" |
         # "riemann_left" | "riemann_middle" | "riemann_trapezoid".
         "method": "gausslegendre",
+        # Scalar IG explains: "logit" (log-odds of P(malign), rescaled to the
+        # probability gap — default, robust to saturation) | "prob" (P(malign)
+        # itself; collapses on saturating classifiers, see classifier_explainer.py).
+        "target": "logit",
         "baseline_token": "mask",  # "mask" | "pad" | "unk"
         "max_length": None,  # None -> no truncation; matches PromptGuardDefense's own scoring
         "progress": True,
@@ -58,6 +66,9 @@ class IntegratedGradientsXAI(BaseXAI):
             n_steps=self.config["n_steps"],
             internal_batch_size=self.config["internal_batch_size"],
             method=self.config["method"],
+            target=self.config["target"],
+            max_n_steps=self.config["max_n_steps"],
+            delta_tol=self.config["delta_tol"],
         )
 
     def explain(self, target_inst: str, context: str, injected_task: str, **kwargs) -> dict:

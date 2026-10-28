@@ -31,6 +31,10 @@ python main.py --dataset squad_v2 --attack direct --defense promptguard --xai sy
 
 All coexist in the same `XAI_REGISTRY` and share the identical `xai_result` output contract (tokens/values/base_value/full_value/injected_span) and the same `scripts/xai_metrics.py` analysis tooling below — switching between them is a `--xai` flag, not a different pipeline.
 
+## Windowed Prompt-Guard (long contexts)
+
+For the `*_long` datasets the whole-context classifier pass is quadratic in memory. `--defense promptguard_windowed --window_tokens 512 --xai kernelshap` scores and explains the context in 512-token windows (block if any window has P(malign) >= 0.5); see [Kernel SHAP](kernelshap.md#windowed-explanation-window_tokens) and the [`promptguard_windowed`](/docs/defenses/promptguard) defense.
+
 ## Analysis Tooling
 
 `scripts/xai_metrics.py` computes faithfulness metrics (Fidelity(t), acc@1, alignment with the injected span) from a `--xai` result file, and renders `shap`-library saliency maps (`shap.plots.text`/`shap.plots.bar`). It infers which method produced a given result file from its filename (`--xai-method auto`, the default) — see [SyntaxSHAP](syntaxshap.md)/`plans/xai-syntaxshap-promptguard.md` and [Kernel SHAP](kernelshap.md)/`plans/xai-kernelshap-promptguard.md` and [Integrated Gradients](ig.md)/`plans/xai-ig-promptguard.md` for the full design of each.

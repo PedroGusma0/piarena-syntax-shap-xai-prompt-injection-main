@@ -19,7 +19,10 @@ python main.py --dataset squad_v2 --attack direct --defense promptguard --xai ig
 ```yaml
 xai: ig
 xai_config:
-  n_steps: 50
+  target: logit          # logit (default) | prob
+  n_steps: 100           # starting steps; doubled while the error > delta_tol
+  max_n_steps: 800       # null = fixed n_steps
+  delta_tol: 0.05
   internal_batch_size: 4
   baseline_token: mask   # mask | pad | unk
   explain_targets: [context]
@@ -27,15 +30,15 @@ xai_config:
 
 ## How it works
 
-- Explained target: `P(malign)` = sum of every class whose label has no "benign" (same binary target as the other methods).
+- Explained target: `P(malign)` = sum of every class whose label has no "benign" (same binary target as the other methods). IG itself runs on its **log-odds** (`target: logit`, default) and the values are rescaled by `(full_value − base_value) / (z_full − z_base)` to the probability scale, so Fidelity and the plots are unchanged. Reason: with `target: prob`, P goes ~0.0005 → ~1.0 in a thin slice of the path; real `squad_v2` runs (50 steps) gave `sum(values)` ≈ 0.005 against a gap ≈ 1.0 on `ignore` (99% of samples with >50% error). Ranking is unaffected by the rescale; magnitudes mean "share of the probability gap".
 - Path: from a baseline (prefix/suffix special tokens kept, every content token replaced by the `baseline_token`) to the real input, in embedding space.
-- Per-token attributions are summed over the embedding dimension and then over each word's subtokens, so `values` is word-aligned with `tokens` and the output contract (`tokens`/`values`/`base_value`/`full_value`/`p_malign`/`injected_span`) matches Kernel SHAP's. Extra fields: `ig_convergence_delta`, `n_steps`, `n_words`.
+- Per-token attributions are summed over the embedding dimension and then over each word's subtokens, so `values` is word-aligned with `tokens` and the output contract (`tokens`/`values`/`base_value`/`full_value`/`p_malign`/`injected_span`) matches Kernel SHAP's. Extra fields: `ig_convergence_delta` (`sum(values) − (full_value − base_value)`), `ig_converged`, `ig_target`, `n_steps` (steps actually used), `n_words`.
 - `scripts/xai_metrics.py` and the plot scripts work unchanged (`--xai-method ig`, inferred from the `-ig-` filename token); re-scoring uses the same word-level masking as Kernel SHAP.
 
 ## Caveats vs. Shapley-based methods
 
 - **Not exactly additive.** `sum(values) ≈ full_value − base_value` only up to `ig_convergence_delta`; `shap.plots.text` shows `base_value + Σ values` as the output value, which then differs from `p_malign` when the delta is large. A warning is logged; raise `n_steps`.
-- **`n_steps=50` is a starting point, not a guarantee.** On a randomly initialized toy DeBERTa (sharply non-linear, synthetic only — not Prompt-Guard) the convergence delta was ~1.8 at 50 steps, ~0.5 at 300 and ~1e-5 at 2000. Always check `ig_convergence_delta` on the real model and raise `n_steps` until it is small relative to `full_value − base_value`.
+- **Adaptive steps.** Starting at `n_steps`, the run doubles the steps (up to `max_n_steps`) until `|delta| ≤ delta_tol · |full_value − base_value|`; samples that still don't converge are flagged `ig_converged: false` (and logged). Cost per sample grows with the steps used. On synthetic saturated toy models the adaptive logit setting converged in 12/12 (mean 192 steps) versus 1/12 for fixed-50 `prob`; this is synthetic evidence, not a measurement on Prompt-Guard — check `ig_converged` in real results.
 - **Saturation.** The target is close to 1.0 for most blocked injections; a coarse path can miss the sharp transition.
 - **Sign/scale semantics.** First-order attribution along a straight path in embedding space (intermediate points are not real tokens); colors are not comparable in magnitude with Kernel SHAP's, only in ranking.
 - **Subtoken sums.** Heavily fragmented words (URLs, CJK) accumulate more terms and tend to larger values.

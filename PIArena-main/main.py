@@ -70,6 +70,14 @@ def parse_args():
                         help="Override the XAI plugin's `explain_scope` config key: which samples get explained — "
                              "auto (default: blocked ones; every sample with --attack none) | blocked | all "
                              "(blocked and not blocked, any attack).")
+    parser.add_argument('--window_tokens', type=int, default=None,
+                        help="Token-window size (e.g. 512) for windowed Prompt-Guard analysis: sets `window_tokens` "
+                             "in BOTH the defense config (used by --defense promptguard_windowed) and the kernelshap "
+                             "xai_config, so the defense and the explainer split the context identically. "
+                             "Omit for the original whole-context behavior.")
+    parser.add_argument('--xai_perturbations_per_eval', type=int, default=None,
+                        help="Override kernelshap's `perturbations_per_eval` (coalitions scored per forward pass; "
+                             "VRAM grows linearly with it).")
 
     args = parser.parse_args()
 
@@ -101,6 +109,11 @@ def parse_args():
         args.xai_config = {**(args.xai_config or {}), "backend": args.xai_backend}
     if args.xai_scope is not None:
         args.xai_config = {**(args.xai_config or {}), "explain_scope": args.xai_scope}
+    if args.window_tokens is not None:
+        args.xai_config = {**(args.xai_config or {}), "window_tokens": args.window_tokens}
+        args.defense_config = {**(args.defense_config or {}), "window_tokens": args.window_tokens}
+    if args.xai_perturbations_per_eval is not None:
+        args.xai_config = {**(args.xai_config or {}), "perturbations_per_eval": args.xai_perturbations_per_eval}
 
     print(args)
     return args

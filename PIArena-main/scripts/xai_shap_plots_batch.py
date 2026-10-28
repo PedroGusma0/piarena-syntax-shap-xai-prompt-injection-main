@@ -42,6 +42,8 @@ def main():
     ap.add_argument("--roots", nargs="*", default=None, help="default: every {xai-method}_* dir in the repo root")
     ap.add_argument("--only", default=None, help="substring filter on the relative path, e.g. dolly_closed_qa")
     ap.add_argument("--skip-existing", action="store_true")
+    ap.add_argument("--window-scope", choices=["all", "flagged", "injected"], default="flagged",
+                    help="Windowed runs only: which windows feed the global rankings (see xai_shap_plots_test.py).")
     ap.add_argument("--top-k", type=int, default=15)
     ap.add_argument("--max-html-samples", type=int, default=None)
     args = ap.parse_args()
@@ -62,13 +64,14 @@ def main():
             continue
         t0 = time.time()
         try:
-            data = T.load_blocked(f)
+            data = T.load_blocked(f, window_scope=args.window_scope)
             if not data:
                 summary.append(("skipped (0 blocked with XAI)", label))
                 print("  skipped: 0 blocked samples with XAI values")
                 continue
             os.makedirs(out, exist_ok=True)
             T.plot_bar_global(data, out)
+            T.plot_bar_global(data, out, min_count=1, filename="bar_global_n1.png")
             T.write_saliency_bars_html(data, out, args.top_k, args.max_html_samples)
             summary.append((f"ok ({len(data)} samples, {time.time() - t0:.0f}s)", label))
         except Exception as e:  # keep going across files

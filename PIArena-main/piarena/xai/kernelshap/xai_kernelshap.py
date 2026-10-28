@@ -55,6 +55,12 @@ class KernelShapXAI(BaseXAI):
         # — pick one via xai_config, no code change needed. See
         # plans/xai-kernelshap-promptguard.md, "Duas implementações".
         "backend": "captum",
+        # None (default) -> one Kernel SHAP game over the whole context. An int
+        # (e.g. 512, set by `--window_tokens`) -> one independent game per
+        # `window_tokens`-token window, same split as the `promptguard_windowed`
+        # defense; results land in `xai_result["windows"]` (and a flat
+        # `xai_result["context"]` view with `windowed: True`).
+        "window_tokens": None,
     }
 
     def __init__(self, config: dict = None):
@@ -78,6 +84,7 @@ class KernelShapXAI(BaseXAI):
             perturbations_per_eval=self.config["perturbations_per_eval"],
             max_length=self.config["max_length"],
             backend=self.config["backend"],
+            window_tokens=self.config["window_tokens"],
         )
 
     def explain(self, target_inst: str, context: str, injected_task: str, **kwargs) -> dict:
@@ -88,9 +95,16 @@ class KernelShapXAI(BaseXAI):
         attack_name = kwargs.get("attack_name")
 
         if "context" in targets:
-            result["context"] = self._explainer.explain_context(
-                context, injected_task=injected_task, attack_name=attack_name, progress=progress,
-            )
+            if self.config["window_tokens"]:
+                windowed = self._explainer.explain_windows(
+                    context, injected_task=injected_task, attack_name=attack_name, progress=progress,
+                )
+                result["context"] = windowed["flat"]
+                result["windows"] = windowed["windows"]
+            else:
+                result["context"] = self._explainer.explain_context(
+                    context, injected_task=injected_task, attack_name=attack_name, progress=progress,
+                )
 
         spans = {"target_inst": target_inst, "injected_task": injected_task}
         for key in targets:

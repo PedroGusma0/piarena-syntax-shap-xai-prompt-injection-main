@@ -310,6 +310,92 @@ def _category_summary(result: dict, per_sample: dict, thresholds) -> dict:
     return summary
 
 
+def _is_windowed(result: dict) -> bool:
+    return any((s.get("defense_result") or {}).get("window_p_malign") for s in result.values())
+
+
+def _windowed_metrics(result: dict, attack: str) -> dict:
+    """Window-level detection metrics for `promptguard_windowed` runs.
+
+    * localization_acc@1 — fraction of attacked samples whose highest-P(malign)
+      window contains the injected task (the detector points at the right region).
+    * detection_rate — fraction of attacked samples blocked (any window >= threshold).
+    * injected_window_hit_rate — fraction of injection-containing windows that
+      are flagged (the injection is not diluted by window boundaries).
+    * false_flag_window_rate — flagged windows without injection / windows without injection.
+    * score_over_basal — mean of (max P(malign) / mean P(malign) of non-injected windows).
+    """
+    from xai_window_anomaly import attack_prefix, window_info
+
+    prefix = attack_prefix(attack)
+    no_attack = attack == "none"
+    loc, det, inj_hit, ratios = [], [], [], []
+    n_flag_clean = n_clean = 0
+    n = 0
+    for sample in result.values():
+        info = window_info(sample, prefix, with_injection=not no_attack)
+        if info is None:
+            continue
+        wins, _ = info
+        n += 1
+        det.append(any(w["block"] for w in wins))
+        clean = [w for w in wins if not w["inj"]]
+        n_clean += len(clean)
+        n_flag_clean += sum(w["block"] for w in clean)
+        if no_attack:
+            continue
+        top = max(range(len(wins)), key=lambda i: wins[i]["p"])
+        injected = [w for w in wins if w["inj"]]
+        if injected:
+            loc.append(bool(wins[top]["inj"]))
+            inj_hit.extend(bool(w["block"]) for w in injected)
+        basal = float(np.mean([w["p"] for w in clean])) if clean else None
+        if basal and basal >= 1e-3:
+            ratios.append(wins[top]["p"] / basal)
+    rate = lambda xs: float(np.mean(xs)) if xs else None
+    return {
+        "n_samples": n,
+        "localization_acc@1": rate(loc),
+        "n_localization": len(loc),
+        "detection_rate": rate(det),
+        "injected_window_hit_rate": rate(inj_hit),
+        "false_flag_window_rate": (n_flag_clean / n_clean) if n_clean else None,
+        "score_over_basal_mean": rate(ratios),
+        "n_windows_mean": float(np.mean([len((s.get("defense_result") or {}).get("window_p_malign") or []) for s in result.values()])) if result else None,
+    }
+
+
+def _main_windowed(args, result: dict, stem: str, out_dir: str):
+    attack = _guess_attack(args.result)
+    metrics = _windowed_metrics(result, attack)
+    metrics_out = {
+        "meta": {"result_path": args.result, "defense": _guess_defense(result, args.result), "attack": attack,
+                 "windowed": True},
+        "windowed": metrics,
+        "asr_utility": _asr_utility_summary(result),
+        "confusion_matrix": _confusion_matrix(result, attack),
+    }
+    metrics_path = os.path.join(out_dir, f"{stem}_metrics.json")
+    save_json(metrics_out, metrics_path)
+    print(f"Wrote {metrics_path}")
+
+    fmt = lambda v: "n/a" if v is None else f"{v:.3f}"
+    lines = [
+        f"# Windowed Prompt-Guard metrics — {stem}", "",
+        f"- attack: `{attack}`, samples with windows: {metrics['n_samples']}, mean windows/sample: {fmt(metrics['n_windows_mean'])}",
+        f"- detection rate (any window >= threshold): {fmt(metrics['detection_rate'])}",
+        f"- localization acc@1 (top-P(malign) window contains the injection): {fmt(metrics['localization_acc@1'])} (n={metrics['n_localization']})",
+        f"- injected-window hit rate: {fmt(metrics['injected_window_hit_rate'])}",
+        f"- false-flag window rate (benign windows flagged): {fmt(metrics['false_flag_window_rate'])}",
+        f"- mean score/basal: {fmt(metrics['score_over_basal_mean'])}", "",
+    ]
+    report_path = os.path.join(out_dir, f"{stem}_report.md")
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    print(f"Wrote {report_path}")
+    print("\n".join(lines))
+
+
 def main():
     args = parse_args()
     result = load_json(args.result)
@@ -326,6 +412,13 @@ def main():
     # saliency maps/charts on disk.
     plots_dir = os.path.join(out_dir, "plots", stem)
     os.makedirs(plots_dir, exist_ok=True)
+
+    if _is_windowed(result):
+        # `--defense promptguard_windowed`: global Fidelity/acc@1 (one coalition game over the
+        # whole context) don't apply — the explained quantity is per window. Window-level
+        # detection metrics instead; no explainer/GPU needed.
+        _main_windowed(args, result, stem, out_dir)
+        return
 
     defense = _guess_defense(result, args.result)
     # No recorded defense (very old result file) -> promptguard, the only one it could be.

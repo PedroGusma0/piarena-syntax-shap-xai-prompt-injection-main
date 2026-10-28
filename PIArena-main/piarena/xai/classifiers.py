@@ -11,6 +11,9 @@ from typing import Optional
 
 CLASSIFIER_FOR_DEFENSE = {
     "promptguard": {"model_name": "meta-llama/Prompt-Guard-86M"},
+    # Same classifier, applied window by window (`piarena.windowing`); the
+    # windowed explainer is selected by `window_tokens` in `xai_config`.
+    "promptguard_windowed": {"model_name": "meta-llama/Prompt-Guard-86M"},
     # PIGuard ships its own model class via `auto_map`, hence trust_remote_code
     # (same flag `PIGuardDefense` itself passes to `from_pretrained`).
     "piguard": {"model_name": "leolee99/PIGuard", "trust_remote_code": True},

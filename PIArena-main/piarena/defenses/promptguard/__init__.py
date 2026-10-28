@@ -1,1 +1,2 @@
 from .defense_promptguard import PromptGuardDefense
+from .defense_promptguard_windowed import PromptGuardWindowedDefense

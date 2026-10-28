@@ -51,7 +51,7 @@ def _defense_from_filename(path):
     return None
 
 
-def load_blocked(path, include_unblocked=True):
+def load_blocked(path, include_unblocked=True, window_scope="flagged"):
     """{idx: dict} of samples with an explained context.
 
     Which samples have one is decided by the XAI method's `explain_scope` (an
@@ -66,6 +66,12 @@ def load_blocked(path, include_unblocked=True):
     for idx, s in result.items():
         # xai_result is explicit None (not absent) for non-explained samples
         ctx = (s.get("xai_result") or {}).get("context")
+        if ctx and ctx.get("windowed") and window_scope != "all":
+            # Windowed run (`promptguard_windowed`): keep only the flagged/injected windows
+            # so the benign ones don't dilute global rankings. See piarena/windowing.py.
+            from piarena.windowing import flatten_windows
+            thr = (s.get("defense_result") or {}).get("block_threshold", 0.5)
+            ctx = flatten_windows(s["xai_result"], thr, window_scope)
         if not ctx or not ctx.get("values"):
             continue
         blocked = bool((s.get("defense_result") or {}).get("detect_flag"))
@@ -196,6 +202,9 @@ def main():
                     help="bar_global.png only ranks tokens seen at least this many times. Default 5 (drops one-off "
                          "tokens); use 1 when each word appears few times, e.g. NotInject (every trigger word is "
                          "nearly unique, so 5 hides all of them).")
+    ap.add_argument("--window-scope", choices=["all", "flagged", "injected"], default="flagged",
+                    help="Only for windowed runs (promptguard_windowed): which windows feed the ranking: "
+                         "flagged (P(malign) >= threshold, default) | injected | all.")
     args = ap.parse_args()
 
     stem = os.path.splitext(os.path.basename(args.result))[0]
@@ -204,7 +213,7 @@ def main():
     local_dir = os.path.join(plots_dir, stem)
     os.makedirs(local_dir, exist_ok=True)
 
-    data = load_blocked(args.result)
+    data = load_blocked(args.result, window_scope=args.window_scope)
     print(f"{len(data)} explained sample(s) with XAI values ({defense_label(data)})")
     if not data:
         return
