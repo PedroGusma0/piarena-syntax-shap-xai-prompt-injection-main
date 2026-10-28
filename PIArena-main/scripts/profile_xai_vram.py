@@ -86,8 +86,14 @@ def forward_peak(model, ids):
             "peak_act_gb": gb(torch.cuda.max_memory_allocated() - base),
             "seconds": time.time() - t0,
         }
-    except torch.OutOfMemoryError:
+    except (torch.OutOfMemoryError, RuntimeError) as e:
+        # An OOM raised inside DeBERTa's TorchScript function (make_log_bucket_position)
+        # surfaces as a plain RuntimeError instead of torch.OutOfMemoryError.
+        if not isinstance(e, torch.OutOfMemoryError) and "out of memory" not in str(e).lower():
+            raise
         out = {"oom": True}
+    # drop the exception's frame references before freeing, or tensors stay alive
+    logits = probs = None
     free_cuda()
     return out
 
