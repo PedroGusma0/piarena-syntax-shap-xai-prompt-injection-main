@@ -1,115 +1,38 @@
-"""Mapa de saliencia por janela: um grafico por janela (Kernel SHAP em janelas).
+"""Mapa de saliencia por janela, com o grafico oficial do SHAP (`shap.plots.text`).
 
-Para cada amostra e cada janela selecionada, uma figura com as palavras da
-janela em ordem de leitura, cada uma com fundo colorido pelo seu valor SHAP
-(φ): vermelho = empurra para malign, azul = empurra para benigno, intensidade
-proporcional a |φ| (escala simetrica por figura). Palavras do `injected_span`
-vem sublinhadas em vermelho. O cabecalho traz P(malign), base, Σφ e os rotulos
+Gera UM arquivo HTML por prompt explicado (por padrao, os bloqueados), com TODAS
+as janelas (padrao) uma apos a outra: cabecalho da janela + `shap.plots.text()`
+das palavras da janela (vermelho = empurra para malign, azul = empurra para benigno). Mesmo
+renderizador do `saliency_maps.html` do `xai_metrics.py`, e mesmo contorno
+amarelo nas palavras do `injected_span`.
+
+Cabecalho de cada janela: `Janela i/N · P(malign) · base · Σφ` e os rotulos
 [INJ] (a janela contem a injecao) e [BLOQUEIO] (P(malign) >= limiar).
 
+Saida: `<out-dir>/idx<i>.html` por prompt + `index.html` com os links.
+
 Le `xai_result["windows"]` (runs com `--defense promptguard_windowed
---window_tokens 512 --xai kernelshap`). Matplotlib puro, sem shap.plots.text.
+--window_tokens 512 --xai kernelshap`). So amostras explicadas (bloqueadas, no
+escopo padrao) tem janelas com valores SHAP.
 
 Uso:
-    python scripts/xai_window_saliency.py --result <json> --idx 0 1 2
-    python scripts/xai_window_saliency.py --result <json> --max-samples 5 --windows all
+    python scripts/xai_window_saliency.py --result <json>
+    python scripts/xai_window_saliency.py --result <json> --idx 0 3 --windows flagged+injected
+    python scripts/xai_window_saliency.py --result <json> --max-samples 10
 """
 import argparse
+import html
 import json
 import os
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib import cm
-from matplotlib.colors import Normalize
 
-ROOT = Path(__file__).resolve().parent.parent
 _ATTACKS = ("direct", "ignore", "completion", "combined", "character", "none")
-FONT = 9
-FIG_W_IN = 13.0
-DPI = 130
-PAD_X, PAD_Y = 4, 3  # px around each word box
 
 
 def _parts(path):
     return os.path.splitext(os.path.basename(path))[0].split("-")
-
-
-def layout(words, max_px, renderer, line_h):
-    """Greedy line wrapping. Returns [(x, y_line_idx, width)] per word, n_lines."""
-    pos, x, line = [], 0.0, 0
-    for w in words:
-        t = plt.Text(0, 0, w, fontsize=FONT, family="DejaVu Sans")
-        t.set_figure(plt.gcf())
-        width = t.get_window_extent(renderer).width + 2 * PAD_X + 4
-        if x + width > max_px and x > 0:
-            x, line = 0.0, line + 1
-        pos.append((x, line, width))
-        x += width
-    return pos, line + 1
-
-
-def render_window(win, sample_title, thr, out_path):
-    words = [t.strip() or "·" for t in win["tokens"]]
-    values = np.asarray(win["values"], dtype=float)
-    if not len(words) or len(words) != len(values):
-        return False
-    vmax = float(np.abs(values).max()) or 1e-9
-    norm = Normalize(vmin=-vmax, vmax=vmax)
-    cmap = matplotlib.colormaps["RdBu_r"]
-
-    span = win.get("injected_span")
-    inj = np.zeros(len(words), dtype=bool)
-    if span:
-        inj[span["start_token"]:span["end_token"]] = True
-
-    width_px = FIG_W_IN * DPI
-    tmp = plt.figure(figsize=(FIG_W_IN, 2), dpi=DPI)
-    renderer = tmp.canvas.get_renderer()
-    line_h = FONT * 1.9 * DPI / 72
-    pos, n_lines = layout(words, width_px - 30, renderer, line_h)
-    plt.close(tmp)
-
-    head_px, foot_px = 90, 70
-    height_px = head_px + n_lines * line_h + foot_px
-    fig = plt.figure(figsize=(FIG_W_IN, height_px / DPI), dpi=DPI)
-    ax = fig.add_axes([0, 0, 1, 1])
-    ax.set_xlim(0, width_px)
-    ax.set_ylim(height_px, 0)
-    ax.axis("off")
-
-    tags = ("[INJ]" if win.get("contains_injection") else "") + ("[BLOQUEIO]" if win["p_malign"] >= thr else "")
-    ax.text(15, 22, f"{sample_title}", fontsize=10, fontweight="bold", va="center")
-    ax.text(15, 50, (f"Janela {win['window_idx']}  ·  P(malign)={win['p_malign']:.3f}  ·  base={win['base_value']:.3f}"
-                     f"  ·  Σφ={values.sum():+.3f}  ·  {len(words)} palavras  {tags}"),
-            fontsize=10, va="center", color="#b30000" if tags else "#222222")
-
-    for i, (w, v) in enumerate(zip(words, values)):
-        x, ln, wd = pos[i]
-        x += 15
-        y = head_px + ln * line_h
-        strength = abs(norm(v) - 0.5) * 2  # 0 (neutral) .. 1
-        ax.add_patch(plt.Rectangle((x, y - line_h * 0.42), wd - 2, line_h * 0.84,
-                                   facecolor=cmap(norm(v)), edgecolor="none", alpha=0.35 + 0.65 * strength))
-        ax.text(x + PAD_X + 2, y, w, fontsize=FONT, va="center", color="white" if strength > 0.75 else "black")
-        if inj[i]:
-            ax.plot([x + 1, x + wd - 3], [y + line_h * 0.42, y + line_h * 0.42], color="#d62728", lw=2.2)
-
-    cax = fig.add_axes([0.62, 0.45 * foot_px / height_px, 0.33, 0.018])
-    sm = cm.ScalarMappable(norm=norm, cmap=cmap)
-    cb = fig.colorbar(sm, cax=cax, orientation="horizontal")
-    cb.set_label("φ (vermelho: → malign · azul: → benigno)", fontsize=8)
-    cb.ax.tick_params(labelsize=7)
-    if inj.any():
-        ax.text(15, height_px - 22, "sublinhado vermelho = palavras da injeção", fontsize=8, color="#d62728", va="center")
-
-    fig.savefig(out_path, dpi=DPI)
-    plt.close(fig)
-    return True
 
 
 def select(entries, thr, mode):
@@ -123,16 +46,56 @@ def select(entries, thr, mode):
     return keep
 
 
+def _helpers():
+    """The span-border / numpy-colour fixes `xai_metrics.py` already applies to shap.plots.text()."""
+    try:
+        from xai_metrics import _fix_numpy_scalar_colors, _mark_injected_span
+        return _fix_numpy_scalar_colors, _mark_injected_span
+    except Exception as e:  # piarena not importable: render without the span border
+        print(f"[aviso] contorno da injecao desativado (nao foi possivel importar xai_metrics: {type(e).__name__}: {e}). "
+              "Rode no ambiente `piarena` (pip install -e .) para te-lo.")
+        return (lambda h: h), (lambda h, span: h)
+
+
+def window_block(shap, win, n_windows, thr, fix_colors, mark_span):
+    values = np.asarray(win["values"], dtype=float)
+    tags = []
+    if win.get("contains_injection"):
+        tags.append("[INJ]")
+    if win["p_malign"] >= thr:
+        tags.append("[BLOQUEIO]")
+    color = "#b30000" if tags else "#222"
+    head = (
+        f"<h4 style='margin:18px 0 4px;color:{color}'>Janela {win['window_idx'] + 1}/{n_windows} "
+        f"&nbsp;·&nbsp; P(malign)={win['p_malign']:.3f} &nbsp;·&nbsp; base={win['base_value']:.3f} "
+        f"&nbsp;·&nbsp; Σφ={values.sum():+.3f} &nbsp;·&nbsp; {len(values)} palavras "
+        f"&nbsp; <b>{' '.join(tags)}</b></h4>"
+    )
+    if not len(values):
+        return head + "<p><i>(janela sem palavras explicadas)</i></p>"
+    explanation = shap.Explanation(values=values, base_values=win["base_value"], data=win["tokens"])
+    try:
+        body = shap.plots.text(explanation, display=False)
+        body = mark_span(fix_colors(body), win.get("injected_span"))
+    except Exception as e:  # one bad window must not kill the report
+        body = f"<p>(falha ao renderizar: {html.escape(str(e))})</p>"
+    return head + body
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--result", type=Path, required=True)
     ap.add_argument("--idx", type=int, nargs="*", default=None)
-    ap.add_argument("--max-samples", type=int, default=5)
-    ap.add_argument("--windows", choices=["flagged", "injected", "flagged+injected", "all"], default="flagged+injected")
+    ap.add_argument("--max-samples", type=int, default=None, help="limite de amostras no HTML (padrao: todas as explicadas)")
+    ap.add_argument("--windows", choices=["all", "flagged", "injected", "flagged+injected"], default="all",
+                    help="quais janelas entram (padrao: todas)")
     ap.add_argument("--out-dir", type=Path, default=None,
-                    help="default: <result dir>/xai_metrics/plots/<result stem>/window_saliency")
+                    help="default: <result dir>/xai_metrics/plots/<result stem>/window_saliency/")
     args = ap.parse_args()
 
+    import shap  # official shap package, plotting only
+
+    fix_colors, mark_span = _helpers()
     result = json.load(open(args.result, encoding="utf-8"))
     parts = _parts(args.result)
     dataset = parts[0]
@@ -142,25 +105,52 @@ def main():
 
     if args.idx:
         idxs = [str(i) for i in args.idx]
-    else:  # first samples that actually have windowed XAI
-        idxs = [i for i, s in result.items() if (s.get("xai_result") or {}).get("windows")][: args.max_samples]
+    else:
+        idxs = [i for i, s in result.items() if (s.get("xai_result") or {}).get("windows")]
+    if args.max_samples:
+        idxs = idxs[: args.max_samples]
 
-    n_fig = 0
+    style = "<style>body{font-family:sans-serif;margin:20px}</style>"
+    n_win, written = 0, []
     for idx in idxs:
         s = result.get(idx) or {}
         entries = (s.get("xai_result") or {}).get("windows")
         if not entries:
             print(f"[skip] amostra {idx}: sem xai_result.windows (amostra nao explicada ou run sem janelas)")
             continue
-        thr = (s.get("defense_result") or {}).get("block_threshold", 0.5)
-        title = f"{dataset} · ataque {attack} · amostra {idx}" + (f" · {s['category']}" if s.get("category") else "")
-        for e in select(entries, thr, args.windows):
-            out = out_dir / f"idx{idx}_win{e['window_idx']}.png"
-            if render_window(e, title, thr, out):
-                n_fig += 1
-                print(f"[ok] {out}")
-    print(f"{n_fig} figura(s) em {out_dir}")
+        dr = s.get("defense_result") or {}
+        thr = dr.get("block_threshold", 0.5)
+        chosen = select(entries, thr, args.windows)
+        status = "BLOQUEADO" if dr.get("detect_flag") else "NÃO BLOQUEADO"
+        cat = f" · {html.escape(str(s['category']))}" if s.get("category") else ""
+        title = f"Prompt {idx} — {status} — {dataset} · ataque {attack}{cat}"
+        doc = [
+            f"<html><head><meta charset='utf-8'><title>{title}</title>{style}</head><body>",
+            f"<h2>{title}</h2>",
+            f"<p>{len(chosen)}/{len(entries)} janelas · P(malign) máx = {max(e['p_malign'] for e in entries):.3f} · "
+            "vermelho: empurra a janela para <b>malign</b>; azul: para <b>benigno</b> · "
+            "<b>[INJ]</b> = a janela contém a injeção (palavras com contorno amarelo) · "
+            "<b>[BLOQUEIO]</b> = P(malign) ≥ limiar.</p>",
+        ]
+        for w in chosen:
+            doc.append(window_block(shap, w, len(entries), thr, fix_colors, mark_span))
+            n_win += 1
+        doc.append("</body></html>")
+        path = out_dir / f"idx{idx}.html"
+        path.write_text("\n".join(doc), encoding="utf-8")
+        written.append((idx, status, len(chosen), len(entries), max(e["p_malign"] for e in entries), path.name))
 
+    if written:
+        rows = "\n".join(
+            f"<li><a href='{name}'>Prompt {i}</a> — {st} — {c}/{n} janelas — P(malign) máx {p:.3f}</li>"
+            for i, st, c, n, p, name in written
+        )
+        (out_dir / "index.html").write_text(
+            f"<html><head><meta charset='utf-8'><title>Window saliency — {dataset} ({attack})</title>{style}</head>"
+            f"<body><h2>Mapas de saliência por janela — {dataset} · ataque {attack}</h2><ul>{rows}</ul></body></html>",
+            encoding="utf-8",
+        )
+    print(f"{len(written)} HTML(s) ({n_win} janela(s)) em {out_dir}")
 
 if __name__ == "__main__":
     main()

@@ -405,7 +405,7 @@ def _main_windowed(args, result: dict, stem: str, out_dir: str):
 def _render_window_plots(result_path: str, out_dir: str, stem: str, max_samples: int):
     """Runs the per-window plot scripts for a windowed result, all writing under
     `<out_dir>/plots/<stem>/`: window_anomaly (P(malign) bars with [INJ]/[BLOQUEIO]),
-    window_saliency (one saliency map per window), bar_global_n1, fig9_frequency.
+    window_saliency (one HTML per blocked prompt, shap.plots.text of every window), bar_global_n1, fig9_frequency.
     Each runs in its own process, so one failing (e.g. no sample was blocked, so no
     XAI values) never hides the others."""
     import subprocess
@@ -419,8 +419,9 @@ def _render_window_plots(result_path: str, out_dir: str, stem: str, max_samples:
     jobs = [
         ("window_anomaly", [py, os.path.join(here, "xai_window_anomaly.py"), "--result", result_path, "--max-samples", n,
                             "--out-dir", os.path.join(plots_dir, "window_anomaly")]),
-        ("window_saliency", [py, os.path.join(here, "xai_window_saliency.py"), "--result", result_path, "--max-samples", n,
-                             "--out-dir", os.path.join(plots_dir, "window_saliency")]),
+        # one HTML per explained (blocked) prompt, shap.plots.text of EVERY window; capped only if asked
+        ("window_saliency", [py, os.path.join(here, "xai_window_saliency.py"), "--result", result_path, "--out-dir", os.path.join(plots_dir, "window_saliency")]
+                            + (["--max-samples", str(max_samples)] if max_samples else [])),
         ("bar_global_n1", [py, os.path.join(here, "xai_shap_plots_test.py"), "--result", result_path, "--min-count", "1",
                            "--out-dir", out_dir]),
         ("fig9_frequency", [py, os.path.join(here, "xai_fig9_frequency.py"), "--roots", result_dir, "--only", stem,
