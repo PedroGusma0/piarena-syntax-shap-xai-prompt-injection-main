@@ -1,5 +1,7 @@
+import time
 from typing import List
 
+import torch
 from transformers import pipeline
 from ..base import BaseDefense, register_defense
 
@@ -25,9 +27,17 @@ class PromptGuardDefense(BaseDefense):
 
     def execute(self, target_inst, context):
         self._ensure_detector()
+        # Times only the classifier inference (not the lazy model load above),
+        # persisted as defense_result["detect_time_s"] for latency reports.
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        t0 = time.perf_counter()
         prediction = self._detector(context)[0]["label"]
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        detect_time_s = time.perf_counter() - t0
         detect_flag = "benign" not in prediction.lower()
-        return {"detect_flag": detect_flag}
+        return {"detect_flag": detect_flag, "detect_time_s": detect_time_s}
 
     def execute_batch(self, target_insts: List[str], contexts: List[str]) -> List[dict]:
         self._validate_batch_inputs(target_insts, contexts)

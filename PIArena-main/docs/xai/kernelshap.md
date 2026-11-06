@@ -121,6 +121,13 @@ python scripts/xai_shap_plots_test.py --result <json> --min-count 1   # bar_glob
 python scripts/xai_fig9_frequency.py --roots <result dir>             # fig9_frequency (--window-scope ...)
 ```
 
+Per-sample report for blocked samples (non-windowed runs), Markdown + LaTeX: V/O/M taxonomy label (vector/objective/mechanic, from `scripts/xai_vom_classify.py`), top malign tokens, and the *injection point* — the sentence with the largest Σφ⁺, its character offsets in the prompt and a per-sentence bar plot:
+
+```bash
+python scripts/xai_vom_classify.py <json> scripts/xai_vom_<dataset>_<attack>.json
+python scripts/xai_relatorio_v2.py --result <json> --vom scripts/xai_vom_<dataset>_<attack>.json   # -> xai_metrics/relatorio_v2/
+```
+
 Ready-made runs: `scripts/run_kernelshap_win512_{lcc_long,passage_retrieval_en_long,qasper_long,hotpotqa_long}.sh`. Design: `plans/xai-promptguard-512-windows.md`.
 
 ## Analysis

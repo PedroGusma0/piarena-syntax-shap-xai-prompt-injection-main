@@ -437,7 +437,139 @@ def _render_window_plots(result_path: str, out_dir: str, stem: str, max_samples:
             print(f"[plots] {name} ok: {tail}")
 
 
+def _cuda_reset():
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.reset_peak_memory_stats()
+    except Exception:
+        pass
+
+
+def _cuda_peak():
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            gb = 1024 ** 3
+            return {"peak_allocated": torch.cuda.max_memory_allocated() / gb,
+                    "peak_reserved": torch.cuda.max_memory_reserved() / gb}
+    except Exception:
+        pass
+    return {"peak_allocated": None, "peak_reserved": None}
+
+
+def _stats(vals):
+    vals = [v for v in vals if v is not None]
+    if not vals:
+        return {"total": None, "mean": None, "median": None, "p95": None, "n": 0}
+    a = np.asarray(vals, dtype=float)
+    return {"total": float(a.sum()), "mean": float(a.mean()), "median": float(np.median(a)),
+            "p95": float(np.percentile(a, 95)), "n": int(a.size)}
+
+
+def _build_latency(result: dict, meta: dict, xai_metrics_s: dict, vram_xai_metrics: dict):
+    """Aggregates the per-sample `timing` blocks `main.py` records, plus this
+    script's own timings/VRAM. Means/medians/p95 exclude the cold-start sample
+    (idx 0: lazy model loading); totals include every sample."""
+    rows = []
+    for idx, s in result.items():
+        t = s.get("timing")
+        if t:
+            rows.append((idx, t))
+    warm = [t for _, t in rows if not t.get("cold_start")]
+
+    def agg(key, only_warm_stats=True):
+        full = _stats([t.get(key) for _, t in rows])
+        w = _stats([t.get(key) for t in warm])
+        return {"total": full["total"], "mean": w["mean"], "median": w["median"],
+                "p95": w["p95"], "n_warm": w["n"]}
+
+    def vmax(key):
+        v = [t.get(key) for _, t in rows if t.get(key) is not None]
+        return max(v) if v else None
+
+    gpu = None
+    total_gb = None
+    try:
+        import torch
+        if torch.cuda.is_available():
+            gpu = torch.cuda.get_device_name(0)
+            total_gb = torch.cuda.get_device_properties(0).total_memory / 1024 ** 3
+    except Exception:
+        pass
+
+    attack = agg("attack_s")
+    attack["cached_samples"] = sum(1 for _, t in rows if t.get("attack_cached"))
+    if attack["cached_samples"]:
+        attack["note"] = "amostras com ataque em cache contam ~0s"
+
+    vram = {
+        "attack": {"peak_allocated": vmax("vram_attack_peak_alloc_gb"),
+                   "peak_reserved": vmax("vram_attack_peak_reserved_gb")},
+        "defense_total": {"peak_allocated": vmax("vram_defense_peak_alloc_gb"),
+                          "peak_reserved": vmax("vram_defense_peak_reserved_gb")},
+        "xai_engine": {"peak_allocated": vmax("vram_xai_peak_alloc_gb"),
+                       "peak_reserved": vmax("vram_xai_peak_reserved_gb")},
+        "xai_metrics": vram_xai_metrics,
+    }
+    peaks = [v["peak_allocated"] for v in vram.values() if v and v.get("peak_allocated") is not None]
+    vram["run_peak_allocated"] = max(peaks) if peaks else None
+
+    per_sample = []
+    for idx, t in rows:
+        per_sample.append({
+            "idx": idx, "cold_start": t.get("cold_start"), "attack_s": t.get("attack_s"),
+            "promptguard_s": t.get("promptguard_s"), "defense_total_s": t.get("defense_total_s"),
+            "xai_s": t.get("xai_s"), "xai_offload_s": t.get("xai_offload_s"),
+            "vram_xai_peak_gb": t.get("vram_xai_peak_alloc_gb"),
+        })
+
+    return {
+        "run": {
+            "attack": meta.get("attack"), "defense": meta.get("defense"),
+            "xai": meta.get("xai_method"), "n_samples": len(result),
+            "n_with_timing": len(rows), "n_cold_start_excluded": len(rows) - len(warm),
+            "gpu": gpu, "torch_cuda_total_gb": total_gb,
+        },
+        "latency_s": {
+            "attack": attack,
+            "promptguard": agg("promptguard_s"),
+            "defense_total": agg("defense_total_s"),
+            "xai_engine": agg("xai_s"),
+            "xai_metrics": xai_metrics_s,
+            "postprocess_shell": {},  # filled in by the run_*_latency.sh wrapper
+        },
+        "vram_gb": vram,
+        "per_sample": per_sample,
+    }
+
+
+def _render_latency_md(lat: dict) -> str:
+    def f(x, nd=3):
+        return "—" if x is None else f"{x:.{nd}f}"
+    L, V = lat["latency_s"], lat["vram_gb"]
+    out = ["## Latência e VRAM", "",
+           "Médias/medianas/p95 excluem a amostra 0 (cold start); totais a incluem.", "",
+           "| Etapa | total (s) | média (s) | mediana (s) | p95 (s) |", "|---|---:|---:|---:|---:|"]
+    for k in ("attack", "promptguard", "defense_total", "xai_engine"):
+        s = L[k]
+        out.append(f"| {k} | {f(s['total'])} | {f(s['mean'])} | {f(s['median'])} | {f(s['p95'])} |")
+    xm = L["xai_metrics"]
+    out += ["", f"xai_metrics: total {f(xm.get('total'), 1)}s "
+            f"(load {f(xm.get('load_explainer'), 1)}s, loop {f(xm.get('metrics_loop'), 1)}s, "
+            f"plots {f(xm.get('plots'), 1)}s)", "",
+            "| Fase | pico alocado (GB) | pico reservado (GB) |", "|---|---:|---:|"]
+    for k in ("attack", "defense_total", "xai_engine", "xai_metrics"):
+        v = V.get(k) or {}
+        out.append(f"| {k} | {f(v.get('peak_allocated'), 2)} | {f(v.get('peak_reserved'), 2)} |")
+    out.append(f"\nPico da run: {f(V.get('run_peak_allocated'), 2)} GB alocados.\n")
+    return "\n".join(out)
+
+
 def main():
+    t_script = time.perf_counter()
     args = parse_args()
     result = load_json(args.result)
     xai_method = args.xai_method if args.xai_method != "auto" else _infer_xai_method(args.result)
@@ -467,9 +599,12 @@ def main():
         defense or "promptguard", None if args.model_name == "auto" else {"model_name": args.model_name},
     )
     model_name = classifier["model_name"]
+    _cuda_reset()
+    t_load = time.perf_counter()
     explainer, make_rescorer = _load_explainer(
         xai_method, model_name, args.algorithm, classifier.get("trust_remote_code", False),
     )
+    load_explainer_s = time.perf_counter() - t_load
 
     attack = _guess_attack(args.result)
     no_attack = attack == "none"
@@ -486,6 +621,7 @@ def main():
         per_sample[idx] = entry
         n_done += 1
     elapsed = time.time() - t0
+    vram_xai_metrics = _cuda_peak()
 
     aggregate = _aggregate(per_sample, args.thresholds, args.alignment_mass)
     aggregate["runtime"] = {
@@ -526,6 +662,7 @@ def main():
         f.write(_render_report(metrics_out))
     print(f"Wrote {report_path}")
 
+    t_plots = time.perf_counter()
     try:
         _render_plots(
             result, per_sample, plots_dir, xai_method, attack, max_samples=args.max_plot_samples,
@@ -534,6 +671,21 @@ def main():
         _render_confusion_matrix(aggregate["confusion_matrix"], plots_dir, defense, model_name, attack)
     except ImportError as e:
         print(f"Skipping plots (shap/matplotlib not installed): {e}")
+    plots_s = time.perf_counter() - t_plots
+
+    # Latency/VRAM report (main.py's per-sample `timing` + this script's own cost).
+    xai_metrics_s = {
+        "total": time.perf_counter() - t_script,
+        "load_explainer": load_explainer_s,
+        "metrics_loop": elapsed,
+        "plots": plots_s,
+    }
+    latency = _build_latency(result, metrics_out["meta"], xai_metrics_s, vram_xai_metrics)
+    latency_path = os.path.join(out_dir, f"{stem}_latency.json")
+    save_json(latency, latency_path)
+    print(f"Wrote {latency_path}")
+    with open(report_path, "a", encoding="utf-8") as f:
+        f.write("\n" + _render_latency_md(latency))
 
     if not args.no_wandb:
         _log_to_wandb(metrics_out, per_sample, plots_dir, args.thresholds)

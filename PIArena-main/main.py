@@ -248,6 +248,23 @@ def main(args):
             },
         )
 
+    # Per-phase latency/VRAM instrumentation (persisted in result_dp["timing"]).
+    def _phase_start():
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.reset_peak_memory_stats()
+        return time.perf_counter()
+
+    def _phase_end(t0):
+        """Returns (elapsed_s, peak_allocated_gb, peak_reserved_gb)."""
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            gb = 1024 ** 3
+            return (time.perf_counter() - t0,
+                    torch.cuda.max_memory_allocated() / gb,
+                    torch.cuda.max_memory_reserved() / gb)
+        return time.perf_counter() - t0, None, None
+
     # Main evaluation loop
     for idx, dp in tqdm(enumerate(dataset)):
         print(f"=========={idx+1} / {len(dataset)}==========")
@@ -264,10 +281,13 @@ def main(args):
 
         # Attack phase
         phase_t0 = time.time()
+        timing = {"cold_start": idx == 0, "attack_cached": True}
+        attack_t0 = _phase_start()
         print(f"[{idx+1}/{len(dataset)}] Attack phase ({attack_name})...")
         try:
             injected_context = attack_result[idx]["injected_context"]
         except:
+            timing["attack_cached"] = False
             injected_context = attack.execute(
                 context=context,
                 injected_task=injected_task,
@@ -285,16 +305,23 @@ def main(args):
         # which `scripts/xai_metrics.py` would otherwise need to also load
         # just to know what text was explained.
         result_dp["injected_context"] = injected_context
+        (timing["attack_s"], timing["vram_attack_peak_alloc_gb"],
+         timing["vram_attack_peak_reserved_gb"]) = _phase_end(attack_t0)
         print(f"[{idx+1}/{len(dataset)}] Attack phase done ({time.time() - phase_t0:.1f}s).")
 
         # Defense phase
         phase_t0 = time.time()
+        defense_t0 = _phase_start()
         print(f"[{idx+1}/{len(dataset)}] Defense phase ({args.defense})...")
         defense_result = defense.get_response(
             target_inst=target_inst,
             context=injected_context,
             llm=llm,
         )
+        (timing["defense_total_s"], timing["vram_defense_peak_alloc_gb"],
+         timing["vram_defense_peak_reserved_gb"]) = _phase_end(defense_t0)
+        # Classifier-only inference time (defenses that report it, e.g. promptguard).
+        timing["promptguard_s"] = defense_result.get("detect_time_s")
 
         response = defense_result["response"]
         result_dp["defense_result"] = defense_result
@@ -335,7 +362,10 @@ def main(args):
                     # right after this block reuses the same `llm` object
                     # (via `utility_evaluator`/`asr_evaluator`) for every
                     # sample, blocked or not.
+                    off_t0 = time.perf_counter()
                     llm.offload()
+                    timing["xai_offload_s"] = time.perf_counter() - off_t0
+                    xai_t0 = _phase_start()
                     try:
                         result_dp["xai_result"] = xai.explain(
                             target_inst=target_inst,
@@ -351,7 +381,12 @@ def main(args):
                             attack_name=attack_name,
                         )
                     finally:
+                        # Engine-only time/VRAM (excludes LLM offload/restore).
+                        (timing["xai_s"], timing["vram_xai_peak_alloc_gb"],
+                         timing["vram_xai_peak_reserved_gb"]) = _phase_end(xai_t0)
+                        res_t0 = time.perf_counter()
                         llm.restore()
+                        timing["xai_restore_s"] = time.perf_counter() - res_t0
                     xai_phase_s = time.time() - phase_t0
                     print(f"[{idx+1}/{len(dataset)}] XAI phase done ({xai_phase_s:.1f}s).")
                 except Exception as e:
@@ -414,6 +449,7 @@ def main(args):
                 "xai_n_words": xai_context.get("n_words"),
             }, step=idx)
 
+        result_dp["timing"] = timing
         evaluation_result[idx] = result_dp
         save_json(evaluation_result, evaluation_result_path)
 
