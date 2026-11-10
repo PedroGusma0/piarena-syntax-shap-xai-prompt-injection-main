@@ -1,4 +1,5 @@
 import os
+import time
 from typing import List
 
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
@@ -36,7 +37,17 @@ class PIGuardDefense(BaseDefense):
 
     def execute(self, target_inst, context):
         self._ensure_detector()
+        # Classifier-only inference time, persisted by main.py as timing["promptguard_s"].
+        try:
+            import torch
+            sync = torch.cuda.synchronize if torch.cuda.is_available() else (lambda: None)
+        except ImportError:
+            sync = lambda: None
+        sync()
+        t0 = time.perf_counter()
         result = self._detector(context)[0]
+        sync()
+        detect_time_s = time.perf_counter() - t0
         prediction = result["label"]
         score = result["score"]
 
@@ -47,7 +58,7 @@ class PIGuardDefense(BaseDefense):
         else:
             raise ValueError(f"Unknown prediction: {prediction}")
 
-        return {"detect_flag": detect_flag, "score": score}
+        return {"detect_flag": detect_flag, "score": score, "detect_time_s": detect_time_s}
 
     def execute_batch(self, target_insts: List[str], contexts: List[str]) -> List[dict]:
         self._validate_batch_inputs(target_insts, contexts)

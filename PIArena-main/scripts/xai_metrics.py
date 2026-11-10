@@ -90,6 +90,11 @@ def parse_args():
                     help="Classifier the explanation was computed on. 'auto' (default) picks it from the "
                          "defense recorded in --result (`defense` field, else the filename's -{defense}- part) "
                          "via piarena.xai.classifiers; an explicit name wins.")
+    p.add_argument("--saliency-cmax", type=float, default=None,
+                   help="Fixed color scale (|SHAP value| that maps to full color) for saliency_maps.html. "
+                        "Default: max |value| over ALL plotted samples, so colors are comparable across "
+                        "samples (shap's default rescales each sample to its own max, which paints "
+                        "near-zero values of a non-blocked sample in full color).")
     p.add_argument("--alignment-mass", type=float, nargs="+", default=[0.5],
                     help="Alignment metric (injected_top_mass_precision): the 'most important' tokens are the "
                          "smallest set covering at least this fraction of the total |SHAP|. One value per "
@@ -667,6 +672,7 @@ def main():
         _render_plots(
             result, per_sample, plots_dir, xai_method, attack, max_samples=args.max_plot_samples,
             defense=defense, model_name=model_name, alignment_mass=args.alignment_mass[0],
+            cmax=args.saliency_cmax,
         )
         _render_confusion_matrix(aggregate["confusion_matrix"], plots_dir, defense, model_name, attack)
     except ImportError as e:
@@ -984,10 +990,23 @@ def _mark_injected_span(html: str, injected_span: dict | None) -> str:
 
 
 def _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples=None,
-                  defense=None, model_name=None, alignment_mass=0.5):
+                  defense=None, model_name=None, alignment_mass=0.5, cmax=None):
     import shap  # official shap package — plotting only, not computation
     import matplotlib
     matplotlib.use("Agg")
+
+    if cmax is None:
+        # shap.plots.text() normalizes colors per-sample by that sample's own max |value|, so a
+        # non-blocked sample with F(x)~1e-3 gets the same saturated color as a blocked one.
+        # A single scale shared by every sample keeps colors proportional to real impact.
+        cmax = max(
+            (float(np.max(np.abs(x["values"]))) for x in
+             ((smp.get("xai_result") or {}).get("context") for smp in result.values())
+             if x and x.get("values")),
+            default=None,
+        )
+        if cmax is not None and cmax <= 0:
+            cmax = None
 
     sample_blocks = []
     for idx, sample in result.items():
@@ -1012,10 +1031,10 @@ def _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples
             f"category={sample.get('category')}, "
             f"predicted_label={xai.get('predicted_label')}, "
             f"detect_flag={blocked}, "
-            f"P(benign)={p_benign}, P(malign)={p_malign}</h3>"
+            f"P(benign)={p_benign}, P(malign)={p_malign}, escala de cor ±{cmax if cmax else 'auto'}</h3>"
         )
         try:
-            body = shap.plots.text(explanation, display=False)
+            body = shap.plots.text(explanation, display=False, **({"cmax": cmax} if cmax else {}))
             body = _fix_numpy_scalar_colors(body)
             body = _mark_injected_span(body, xai.get("injected_span"))
         except Exception as e:  # pragma: no cover — defensive, don't let one bad sample kill the whole report
