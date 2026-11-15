@@ -1,12 +1,12 @@
 #!/bin/bash
 # PIGuard (--defense piguard), squad_v2, ataque direct, COM --xai kernelshap (backend
-# shap, todas as amostras), registrando os tempos por fase. O main.py grava por
+# captum, todas as amostras), registrando os tempos por fase. O main.py grava por
 # amostra result["timing"]: attack_s, promptguard_s (so o forward do classificador),
 # xai_s (motor de XAI) e defense_total_s. Ao final, este script resume
 # (media/mediana/p90/p99/max/total, sem a amostra cold_start) em
 # ${OUT_ROOT}/latency.json e latency.txt e roda o xai_metrics.py.
 #
-# Variaveis opcionais: BACKEND_LLM=... SEED=42 bash scripts/<este>.sh
+# Variaveis opcionais: PPE=16 (perturbations_per_eval, default 8) BACKEND_LLM=... SEED=42 LIMIT=3 bash scripts/<este>.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -16,7 +16,10 @@ DEFENSE=piguard
 XAI=kernelshap
 BACKEND_LLM=${BACKEND_LLM:-Qwen/Qwen3-4B-Instruct-2507}
 SEED=${SEED:-42}
-NAME=piguard_xai_latency_${DATASET}_${ATTACK}
+PPE=${PPE:-8}
+NAME=piguard_xai_latency_${DATASET}_${ATTACK}_captum_ppe${PPE}
+LIMIT_ARGS=()
+[ -n "${LIMIT:-}" ] && LIMIT_ARGS=(--limit "$LIMIT")
 
 OUT_ROOT="results/evaluation_results/${NAME}"
 RESULT="${OUT_ROOT}/${DATASET}-${BACKEND_LLM//\//-}-${ATTACK}-${DEFENSE}-${XAI}-${SEED}.json"
@@ -27,16 +30,18 @@ python main.py \
   --attack "$ATTACK" \
   --defense "$DEFENSE" \
   --xai "$XAI" \
-  --xai_backend shap \
+  --xai_backend captum \
+  --xai_perturbations_per_eval "$PPE" \
   --xai_scope all \
   --name "$NAME" \
-  --seed "$SEED"
+  --seed "$SEED" \
+  "${LIMIT_ARGS[@]}"
 
-python - "$RESULT" "$OUT_ROOT" <<'PYEOF'
+python -"$RESULT" "$OUT_ROOT" "$PPE" <<'PYEOF'
 import json, os, sys
 import numpy as np
 
-path, out_root = sys.argv[1:3]
+path, out_root, ppe = sys.argv[1], sys.argv[2], int(sys.argv[3])
 all_samples = list(json.load(open(path, encoding="utf-8")).values())
 # exclui a amostra cold_start (inclui o carregamento dos modelos)
 samples = [s for s in all_samples if not (s.get("timing") or {}).get("cold_start")]
@@ -56,10 +61,10 @@ def stats(key):
             "p99_s": float(np.percentile(v, 99)), "min_s": float(v.min()),
             "max_s": float(v.max())}
 
-summary = {"result": path, **{k: stats(k) for k in KEYS}}
+summary = {"result": path, "xai_backend": "captum", "perturbations_per_eval": ppe, **{k: stats(k) for k in KEYS}}
 json.dump(summary, open(os.path.join(out_root, "latency.json"), "w"), indent=2)
 
-lines = [f"{'metrica':<17}{'n':>6}{'media':>10}{'mediana':>10}{'p90':>10}{'p99':>10}{'max':>10}{'total':>10}"]
+lines = [f"perturbations_per_eval={ppe} (backend captum)", f"{'metrica':<17}{'n':>6}{'media':>10}{'mediana':>10}{'p90':>10}{'p99':>10}{'max':>10}{'total':>10}"]
 for k in KEYS:
     s = summary[k]
     if s:
@@ -71,3 +76,15 @@ print(text)
 PYEOF
 
 python scripts/xai_metrics.py --result "$RESULT" --no-wandb
+
+# Grava o perturbations_per_eval e o backend tambem no JSON de latencia do xai_metrics.
+STEM="$(basename "${RESULT%.json}")"
+python3 - "${OUT_ROOT}/xai_metrics/${STEM}_latency.json" "$PPE" <<'PY'
+import json, sys
+p, ppe = sys.argv[1], int(sys.argv[2])
+d = json.load(open(p))
+d.setdefault("run", {})["perturbations_per_eval"] = ppe
+d["run"]["xai_backend"] = "captum"
+json.dump(d, open(p, "w"), indent=2)
+PY
+echo "Latencia: ${OUT_ROOT}/latency.json e ${OUT_ROOT}/xai_metrics/${STEM}_latency.json"
