@@ -37,7 +37,7 @@ python main.py \
   --seed "$SEED" \
   "${LIMIT_ARGS[@]}"
 
-python -"$RESULT" "$OUT_ROOT" "$PPE" <<'PYEOF'
+python - "$RESULT" "$OUT_ROOT" "$PPE" <<'PYEOF'
 import json, os, sys
 import numpy as np
 
