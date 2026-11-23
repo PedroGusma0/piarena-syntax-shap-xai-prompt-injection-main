@@ -71,7 +71,7 @@ import numpy as np
 
 from piarena.utils import save_json
 from piarena.xai.classifiers import resolve_classifier
-from piarena.xai.detectors import load_detector, resolve_detector
+from piarena.xai.detectors import load_detector, resolve_detector, xai_plugin_for
 from piarena.xai.metrics import (
     acc_at_1,
     deletion_flip,
@@ -644,6 +644,10 @@ def main():
 
     defense = _guess_defense(result, args.result)
     # No recorded defense (very old result file) -> promptguard, the only one it could be.
+    # `--xai kernelshap` on a boolean-detector defense (datasentinel) is the `blackbox`
+    # implementation (Kernel SHAP over the real detect_flag); the result file keeps the
+    # name `kernelshap`, the reports show "kernelshap (detector booleano)".
+    xai_method = xai_plugin_for(xai_method, defense)
     if xai_method == "blackbox":
         # Boolean detector (e.g. DataSentinel), not a classifier: `resolve_classifier` would refuse it.
         classifier = resolve_detector(defense or "datasentinel", None)
@@ -692,7 +696,8 @@ def main():
     metrics_out = {
         "meta": {
             "result_path": args.result,
-            "xai_method": xai_method,
+            "xai_method": "kernelshap (detector booleano)" if xai_method == "blackbox" else xai_method,
+            "boolean_detector": xai_method == "blackbox",
             "model_name": model_name,
             "defense": defense,
             "attack": attack,
@@ -977,7 +982,7 @@ def _render_report(metrics_out) -> str:
         title += f" ({meta['algorithm']})"
     title += f" ({meta['model_name']})"
     n_blocked_expl = sum(1 for e in metrics_out["per_sample"].values() if e.get("detect_flag") is True)
-    is_bb = meta["xai_method"] == "blackbox"
+    is_bb = bool(meta.get("boolean_detector"))
     lines = [
         title,
         "",
@@ -1274,7 +1279,8 @@ def _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples
             break
 
     n = len(sample_blocks)
-    html_parts = [f"<html><head><meta charset='utf-8'><title>{xai_method} saliency maps — {defense} ({attack})</title></head><body>",
+    shown_method = "kernelshap (detector booleano)" if xai_method == "blackbox" else xai_method
+    html_parts = [f"<html><head><meta charset='utf-8'><title>{shown_method} saliency maps — {defense} ({attack})</title></head><body>",
                   f"<h2>Defense explained: {defense} ({model_name}) — attack: {attack}</h2>"]
     html_parts.extend(sample_blocks)
     html_parts.append("</body></html>")

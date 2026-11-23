@@ -51,6 +51,21 @@ DETECTOR_FOR_DEFENSE = {
 }
 
 
+def xai_plugin_for(xai_name: Optional[str], defense_name: Optional[str]) -> Optional[str]:
+    """The XAI plugin that actually implements `--xai {xai_name}` for `defense_name`.
+
+    `--xai kernelshap` explains a classifier through its logits (`piarena/xai/
+    kernelshap/`). A defense that is only a boolean detector (e.g. `datasentinel`,
+    listed in `DETECTOR_FOR_DEFENSE`) has none, so Kernel SHAP runs over its real
+    `detect_flag` instead, in the `blackbox` plugin; it is still Kernel SHAP
+    (captum), and `--xai kernelshap` stays the name the user types and the one in
+    the result file. Every other combination is returned unchanged, so
+    PromptGuard/PIGuard keep going through `kernelshap` exactly as before."""
+    if xai_name == "kernelshap" and defense_name in DETECTOR_FOR_DEFENSE:
+        return "blackbox"
+    return xai_name
+
+
 def resolve_detector(defense_name: str, overrides: Optional[dict] = None) -> dict:
     """XAI config for `defense_name`'s detector, merged with the user's own
     `overrides` (which win — e.g. an explicit `adapter` in `xai_config`).

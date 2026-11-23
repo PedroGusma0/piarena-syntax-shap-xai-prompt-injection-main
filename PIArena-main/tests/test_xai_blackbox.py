@@ -18,7 +18,7 @@ import numpy as np
 
 from piarena.xai.blackbox.explainer import BlackBoxExplainer
 from piarena.xai.blackbox.perturb import segment
-from piarena.xai.detectors import Verdict, resolve_detector
+from piarena.xai.detectors import Verdict, resolve_detector, xai_plugin_for
 
 
 class FakeDetector:
@@ -230,6 +230,16 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(XAI_CLASSES.get(name).resolve_config("promptguard", {"a": 1}), {"a": 1})
             self.assertIsNone(XAI_CLASSES.get(name).resolve_config("promptguard", None))
 
+    def test_kernelshap_on_a_boolean_detector_routes_to_blackbox_only(self):
+        # `--xai kernelshap --defense datasentinel` -> Kernel SHAP over the real detect_flag ...
+        self.assertEqual(xai_plugin_for("kernelshap", "datasentinel"), "blackbox")
+        # ... and nothing else is rerouted: PromptGuard/PIGuard keep the classifier-based plugins.
+        for defense in ("promptguard", "promptguard_windowed", "piguard", "none", None):
+            self.assertEqual(xai_plugin_for("kernelshap", defense), "kernelshap")
+        for xai in ("ig", "syntaxshap", "blackbox", None):
+            self.assertEqual(xai_plugin_for(xai, "datasentinel"), xai)
+            self.assertEqual(xai_plugin_for(xai, "promptguard"), xai)
+
     def test_blackbox_config_defaults(self):
         from piarena.xai import XAI_CLASSES
         cfg = XAI_CLASSES.get("blackbox").resolve_config("datasentinel", None)
@@ -308,9 +318,10 @@ class XaiMetricsBlackboxTests(unittest.TestCase):
         agg["confusion_matrix"] = self.m._confusion_matrix({"0": sample}, "direct")
         agg["blackbox_summary"] = self.m._blackbox_summary({"0": sample})
         self.assertEqual(agg["confusion_matrix"]["TP"], 1)  # bool detect_flag is counted
-        meta = {"xai_method": "blackbox", "model_name": "datasentinel", "defense": "datasentinel", "attack": "direct",
+        meta = {"xai_method": "kernelshap (detector booleano)", "boolean_detector": True, "model_name": "datasentinel", "defense": "datasentinel", "attack": "direct",
                 "result_path": "x.json", "n_samples": 1, "thresholds": [0.1, 0.5], "no_attack": False}
         report = self.m._render_report({"meta": meta, "aggregate": agg, "per_sample": per_sample})
+        self.assertIn("kernelshap (detector booleano)", report)
         self.assertIn("Saída real do detector", report)
         self.assertIn("Kernel SHAP sobre o rótulo binário", report)
         self.assertIn("Alinhamento (span injetado)", report)

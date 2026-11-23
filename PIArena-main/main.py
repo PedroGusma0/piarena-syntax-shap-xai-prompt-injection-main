@@ -19,6 +19,7 @@ from piarena.attacks import get_attack
 from piarena.defenses import get_defense
 from piarena.xai import get_xai, XAI_CLASSES
 from piarena.xai.classifiers import resolve_classifier
+from piarena.xai.detectors import xai_plugin_for
 from piarena.evaluations import (
     llm_judge, open_prompt_injection_utility,
     substring_match, longbench_metric_dict,
@@ -170,16 +171,20 @@ def main(args):
 
     # Instantiate XAI method (opt-in; None unless --xai is passed)
     xai_config = args.xai_config
-    if args.xai in ("kernelshap", "ig"):
+    # `--xai kernelshap` with a defense that is only a boolean detector (datasentinel)
+    # runs Kernel SHAP over its real detect_flag in the `blackbox` plugin; for every
+    # other combination this is `args.xai` unchanged.
+    xai_name = xai_plugin_for(args.xai, args.defense)
+    if xai_name in ("kernelshap", "ig"):
         # Explain the classifier the defense actually uses (e.g. PIGuard for
         # --defense piguard), not the plugin's default model; an explicit
         # `model_name` in xai_config still wins.
         xai_config = resolve_classifier(args.defense, xai_config)
-    elif args.xai:
+    elif xai_name:
         # Other plugins adapt their own config to the defense (identity by
         # default; `blackbox` picks the boolean-detector adapter).
-        xai_config = XAI_CLASSES.get(args.xai).resolve_config(args.defense, xai_config)
-    xai = get_xai(args.xai, config=xai_config) if args.xai else None
+        xai_config = XAI_CLASSES.get(xai_name).resolve_config(args.defense, xai_config)
+    xai = get_xai(xai_name, config=xai_config) if xai_name else None
     if xai is not None:
         print(f"Initialized XAI method: {xai} (config: {xai.config})")
 

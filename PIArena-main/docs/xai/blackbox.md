@@ -4,14 +4,15 @@ slug: xai-blackbox
 category: guide
 ---
 
-# Black-box XAI (`--xai blackbox`)
+# Kernel SHAP for boolean detectors (DataSentinel)
 
-Explains a detection defense that is only reachable as a boolean function `text -> detect_flag` — currently **`datasentinel`** (a Mistral-7B + LoRA *known-answer* detector: it is asked to repeat `DGDSGNH` while ignoring the context, and the context is flagged when the key is missing from the generated text) — with **Kernel SHAP (`captum.attr.KernelShap`) over the defense's real decision**, every word a player. The values are per word, like the [Kernel SHAP](kernelshap.md) ones for the classifiers, so the saliency maps and metrics are comparable; nothing in the classifier-based plugins is touched.
+Reached as **`--xai kernelshap --defense datasentinel`** (the plugin is registered as `blackbox`, and `--xai blackbox` also works; `main.py` routes `kernelshap` to it only for defenses listed in `DETECTOR_FOR_DEFENSE`, so PromptGuard/PIGuard still use the classifier-based [Kernel SHAP](kernelshap.md) unchanged). Explains a detection defense that is only reachable as a boolean function `text -> detect_flag` — currently **`datasentinel`** (a Mistral-7B + LoRA *known-answer* detector: it is asked to repeat `DGDSGNH` while ignoring the context, and the context is flagged when the key is missing from the generated text) — with **Kernel SHAP (`captum.attr.KernelShap`) over the defense's real decision**, every word a player. The values are per word, like the [Kernel SHAP](kernelshap.md) ones for the classifiers, so the saliency maps and metrics are comparable; nothing in the classifier-based plugins is touched.
 
 ```bash
-python main.py --dataset squad_v2 --attack direct --defense datasentinel --xai blackbox --xai_backend captum --limit 3 --name bb_pilot
-python scripts/xai_metrics.py --result results/evaluation_results/bb_pilot/<...>-datasentinel-blackbox-42.json
-# or: bash scripts/run_blackbox_datasentinel_squad_v2_direct.sh   (LIMIT=3 BASELINE=empty|neutral|clean_context N_SAMPLES=auto|800)
+python main.py --dataset squad_v2 --attack direct --defense datasentinel --xai kernelshap --xai_backend captum --limit 5 --name ds_pilot
+python scripts/xai_metrics.py --result results/evaluation_results/ds_pilot/<...>-datasentinel-kernelshap-42.json
+# or, with latency/VRAM and the cost per detector call:
+bash scripts/run_kernelshap_captum_datasentinel_squad_v2_direct_latency.sh   # LIMIT=5 (default) BASELINE=empty|neutral|clean_context N_SAMPLES=auto|800
 ```
 
 > Needs a GPU, the DataSentinel checkpoints, and `torch` + `captum` + `scikit-learn`. Implemented and unit-tested with fake detectors only (including the real captum solver on synthetic games); not yet run against the real model.

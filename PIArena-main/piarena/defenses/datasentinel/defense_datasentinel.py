@@ -1,3 +1,4 @@
+import time
 from typing import List
 
 from .OpenPromptInjection.apps import DataSentinelDetector
@@ -39,13 +40,20 @@ class DataSentinelDefense(BaseDefense):
 
     def execute(self, target_inst, context):
         self._ensure_detector()
+        t0 = time.perf_counter()
         verdict = self._detector.detect_verbose(context)
+        detect_time_s = time.perf_counter() - t0
         # `detect_flag` is a bool (the detector itself returns 1/0): main.py and
         # scripts/xai_metrics.py count blocked samples with `is True`/`is False`,
         # which an int would silently fail. `detector_output` is the text the
         # model actually generated -- recorded for every sample (see
         # plans/xai-blackbox-datasentinel.md).
-        return {"detect_flag": bool(verdict["flag"]), "detector_output": verdict["raw_output"]}
+        return {
+            "detect_flag": bool(verdict["flag"]),
+            "detector_output": verdict["raw_output"],
+            # main.py logs this as timing["promptguard_s"] (the detector-only time).
+            "detect_time_s": detect_time_s,
+        }
 
     def execute_batch(self, target_insts: List[str], contexts: List[str]) -> List[dict]:
         self._validate_batch_inputs(target_insts, contexts)

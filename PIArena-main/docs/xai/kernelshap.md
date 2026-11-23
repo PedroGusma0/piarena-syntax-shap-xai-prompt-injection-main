@@ -147,3 +147,7 @@ Plots written to `<out-dir>/plots/`:
 The Markdown report ends with an ASR/Utility summary computed over the *entire* raw result (every dataset sample, not just the ones XAI explained) — the benchmark-level numbers the per-sample XAI metrics sit inside, split into overall / blocked / not-blocked — followed by a per-`category` breakdown (Fidelity/acc@1 at the largest requested threshold, plus ASR/Utility over the whole category) when the dataset provides a `category` field (e.g. `squad_v2`'s phishing/access-denial/content-promotion/infrastructure-failure labels); omitted entirely for datasets without one. Each `saliency_maps.html` sample header also names the category alongside the attack.
 
 See `plans/xai-kernelshap-promptguard.md` for what each metric means and why it's defined that way.
+
+## Defenses without logits (DataSentinel)
+
+`--xai kernelshap --defense datasentinel` runs the same method — Kernel SHAP, captum backend, every word a player — over the defense's real `detect_flag` instead of `P(malign)`, because DataSentinel (a generative known-answer detector) has no classifier head. `main.py` routes it to the `blackbox` plugin only for such defenses; PromptGuard/PIGuard are untouched. See [Kernel SHAP for boolean detectors](blackbox.md).

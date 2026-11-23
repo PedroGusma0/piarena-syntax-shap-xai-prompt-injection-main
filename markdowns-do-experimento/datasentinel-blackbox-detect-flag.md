@@ -4,7 +4,7 @@ title: DataSentinel — Kernel SHAP sobre o rótulo binário (detect_flag)
 
 # DataSentinel no experimento de XAI: Kernel SHAP sobre o `detect_flag`
 
-> Baseado em `PIArena-main/piarena/xai/blackbox/` (plugin `--xai blackbox`), `piarena/xai/detectors.py` e nas mudanças em `piarena/defenses/datasentinel/`. Design completo em `PIArena-main/plans/xai-blackbox-datasentinel.md`; uso em `PIArena-main/docs/xai/blackbox.md`. Complementa [[kernel-shap-adaptacao-encoder-classifier]] e [[ig-adaptacao-encoder-classifier]] (os métodos que explicam classificadores) e [[custo-computacional-syntaxshap]] (o gargalo que torna o SyntaxSHAP inviável em um 7B). **Estado: implementado e verificado só com detectores fictícios em CPU; nada foi rodado com o Mistral/DataSentinel real (sem GPU neste sandbox). Nenhum resultado empírico é afirmado aqui.**
+> Baseado em `PIArena-main/piarena/xai/blackbox/` (acionado por `--xai kernelshap --defense datasentinel`), `piarena/xai/detectors.py` e nas mudanças em `piarena/defenses/datasentinel/`. Design completo em `PIArena-main/plans/xai-blackbox-datasentinel.md`; uso em `PIArena-main/docs/xai/blackbox.md`. Complementa [[kernel-shap-adaptacao-encoder-classifier]] e [[ig-adaptacao-encoder-classifier]] (os métodos que explicam classificadores) e [[custo-computacional-syntaxshap]] (o gargalo que torna o SyntaxSHAP inviável em um 7B). **Estado: implementado e verificado só com detectores fictícios em CPU; nada foi rodado com o Mistral/DataSentinel real (sem GPU neste sandbox). Nenhum resultado empírico é afirmado aqui.**
 
 ## 1. Como o DataSentinel decide (o que a defesa faz)
 
@@ -34,6 +34,10 @@ Com C o detector é uma **caixa-preta booleana** (`texto -> 0/1`). Consequência
 - Some o risco "proxy × decisão real": o alvo *é* a decisão.
 - A perturbação é uma operação de **string**, não de ids de tokens: palavras e sentenças não mantidas são **apagadas** (sem token de máscara; o Mistral não tem `[MASK]`).
 - O explainer é genérico: qualquer defesa que devolva `detect_flag` pode usá-lo com um adapter.
+
+## 2b. Como chamar: `--xai kernelshap --defense datasentinel`
+
+Por dentro o plugin se chama `blackbox`, mas o nome que se digita (e que aparece no arquivo de resultado e nos relatórios) é **`kernelshap`**. `piarena/xai/detectors.py: xai_plugin_for` faz o `main.py` e o `xai_metrics.py` encaminharem `kernelshap` para esse plugin **somente** quando a defesa está em `DETECTOR_FOR_DEFENSE` (hoje, `datasentinel`). Para `promptguard`, `promptguard_windowed` e `piguard` nada muda: continuam no `kernelshap` baseado em classificador. `--xai blackbox` também funciona. Os relatórios mostram "kernelshap (detector booleano)". O `DataSentinelDefense` também passou a gravar `detect_time_s`, então `timing.promptguard_s` deixa de ser vazio para ele. Script: `scripts/run_kernelshap_captum_datasentinel_squad_v2_direct_latency.sh` (5 amostras por padrão; latência/VRAM, chamadas ao detector e segundos por chamada, depois o `xai_metrics`).
 
 ## 3. Interface para não quebrar PromptGuard/PIGuard
 
