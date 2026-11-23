@@ -28,7 +28,7 @@ python main.py --dataset squad_v2 --attack direct --defense promptguard --xai sy
 - [Kernel SHAP](kernelshap.md) — `captum.attr.KernelShap`/`shap.KernelExplainer`-based word-level Shapley values, for text-classification defenses (currently `promptguard`).
 
 - [Integrated Gradients](ig.md) — `captum.attr.LayerIntegratedGradients` over the classifier's embeddings (white-box, fixed `n_steps` cost, word-aligned values; not exactly additive).
-- [Black-box detector](blackbox.md) — `--xai blackbox`: explains the real `detect_flag` of a boolean detection defense (currently `datasentinel`) by perturbing its input (delta debugging for a minimal triggering set, exact Shapley over sentences); records the detector's real generated output per prompt.
+- [Black-box detector](blackbox.md) — `--xai blackbox`: Kernel SHAP (captum) over the real `detect_flag` of a boolean detection defense (currently `datasentinel`), every word a player; records the detector's real generated output per prompt.
 
 All coexist in the same `XAI_REGISTRY` and share the identical `xai_result` output contract (tokens/values/base_value/full_value/injected_span) and the same `scripts/xai_metrics.py` analysis tooling below — switching between them is a `--xai` flag, not a different pipeline.
 

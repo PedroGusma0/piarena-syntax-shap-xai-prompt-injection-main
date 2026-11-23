@@ -1,7 +1,7 @@
 """`--xai blackbox` — explains a detection defense that is only reachable as a
-boolean function `text -> detect_flag` (DataSentinel today) by perturbing its
-input and calling it, with the defense's real decision as the explained
-target. Counterpart of `--xai kernelshap`/`ig`/`syntaxshap`, which need a
+boolean function `text -> detect_flag` (DataSentinel today) with Kernel SHAP
+(captum) over the defense's real decision, by perturbing its input and calling
+it. Counterpart of `--xai kernelshap`/`ig`/`syntaxshap`, which need a
 classifier's logits; nothing in those plugins is touched. See
 `plans/xai-blackbox-datasentinel.md` for the design rationale and
 `piarena/xai/blackbox/explainer.py` for the actual explanation logic.
@@ -26,19 +26,24 @@ class BlackBoxXAI(BaseXAI):
         # `--attack none`) | "blocked" | "all". See `BaseXAI.should_explain`.
         "explain_scope": "auto",
         "explain_targets": ["context"],
-        # Ordered; the first one fills `values`, the rest go to `extra_methods`.
-        "methods": ["ddmin", "sentence_shapley"],
-        # What the detector is given when nothing is kept: "empty" (empty text) |
+        # What the detector is given when no word is kept: "empty" (empty text) |
         # "neutral" (`neutral_text`) | "clean_context" (the context minus the
-        # injected span; players are then only the injected span's words).
+        # injected span; the players are then only the injected span's words).
         "baseline": "empty",
         "neutral_text": "The weather is nice today.",
         # Extra detector runs on the full context, to flag non-deterministic generation.
         "determinism_checks": 3,
-        # Exact Shapley over sentences needs 2^M detector calls.
-        "max_exact_sentences": 10,
-        "max_detector_calls": 2000,
-        "record_trace": False,
+        # Kernel SHAP over the detector's 0/1 decision, every word a player.
+        # captum only (project rule: never the `shap` backend for Kernel SHAP).
+        "backend": "captum",
+        # "auto" -> clip(16 * n_words, 400, max_detector_calls): to be calibrated
+        # on the GPU machine against exact Shapley on small games (see the plan).
+        "n_samples": "auto",
+        # captum's perturbations_per_eval; every row is still one detector call.
+        "batch_size": 8,
+        "seed": 0,
+        # Per-sample budget of distinct detector calls (preconditions + Kernel SHAP).
+        "max_detector_calls": 3500,
         "progress": True,
     }
 
@@ -57,13 +62,14 @@ class BlackBoxXAI(BaseXAI):
 
         self._explainer = BlackBoxExplainer(
             load_detector(self.config),
-            methods=self.config["methods"],
             baseline=self.config["baseline"],
             neutral_text=self.config["neutral_text"],
             determinism_checks=self.config["determinism_checks"],
-            max_exact_sentences=self.config["max_exact_sentences"],
+            backend=self.config["backend"],
+            n_samples=self.config["n_samples"],
+            batch_size=self.config["batch_size"],
+            seed=self.config["seed"],
             max_detector_calls=self.config["max_detector_calls"],
-            record_trace=self.config["record_trace"],
         )
 
     def explain(self, target_inst: str, context: str, injected_task: str, **kwargs) -> dict:

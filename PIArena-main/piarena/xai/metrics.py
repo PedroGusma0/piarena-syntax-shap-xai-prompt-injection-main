@@ -134,9 +134,9 @@ def injected_top_mass_precision(
 #
 # With a 0/1 `rescore_fn` (the detector's own decision), Fidelity(t) is 0/1
 # per sample and acc@1(t) == 1 - Fidelity(t) exactly, so the two carry the
-# same information there. These metrics are the ones that add something:
-# the deletion test (necessity), the size of the minimal set (sparsity) and
-# how much of it lies inside the injected span.
+# same information there. The deletion test (necessity) is the one that adds
+# something; the mass-based injected-span alignment above applies unchanged to
+# the (continuous) Kernel SHAP values.
 # ---------------------------------------------------------------------------
 
 def deletion_flip(
@@ -155,12 +155,3 @@ def deletion_flip(
         out[str(t)] = bool(full_value >= 0.5 and rescore_fn(keep_mask) < 0.5)
     return out
 
-
-def minimal_set_precision(minimal_set: Sequence[int], injected_span: Optional[dict]) -> Optional[float]:
-    """Fraction of the minimal set's words that lie inside `injected_span`.
-    None without a span or with an empty set."""
-    if not injected_span or not minimal_set:
-        return None
-    start, end = injected_span["start_token"], injected_span["end_token"]
-    inside = sum(1 for i in minimal_set if start <= i < end)
-    return float(inside / len(minimal_set))

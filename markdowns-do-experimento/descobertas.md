@@ -253,4 +253,4 @@ Nenhum achado ainda. O `--xai ig` foi implementado, mas não rodou com o Prompt-
 
 ## Pendente: DataSentinel (`--xai blackbox`)
 
-Nenhum achado ainda. O plugin `blackbox` foi implementado e testado só com detectores fictícios (CPU); não rodou com o Mistral/DataSentinel real. Após a primeira rodada, registrar aqui: fração de amostras com `baseline_valid`, amostras não determinísticas, tamanho típico do conjunto mínimo, `minimal_set_precision`, taxa de deleção e o texto que o detector gera nas amostras bloqueadas e nas que passam. Ver [[datasentinel-blackbox-detect-flag]].
+Nenhum achado ainda. O plugin `blackbox` (Kernel SHAP sobre o `detect_flag`) foi implementado e testado só com detectores fictícios (CPU); não rodou com o Mistral/DataSentinel real. Após a primeira rodada, registrar aqui: fração de amostras com `baseline_valid`, amostras não determinísticas, tempo por chamada do detector, erro de eficiência, estabilidade entre sementes, `injected_top_mass_precision`, taxa de deleção e o texto que o detector gera nas amostras bloqueadas e nas que passam. Ver [[datasentinel-blackbox-detect-flag]].

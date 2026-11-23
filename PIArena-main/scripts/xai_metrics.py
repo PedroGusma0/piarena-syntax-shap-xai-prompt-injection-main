@@ -77,7 +77,6 @@ from piarena.xai.metrics import (
     deletion_flip,
     fidelity,
     injected_top_mass_precision,
-    minimal_set_precision,
 )
 
 _XAI_METHODS = ("syntaxshap", "kernelshap", "ig", "blackbox")
@@ -271,32 +270,25 @@ def compute_one(sample, make_rescorer, thresholds, skip_alignment=False, alignme
     if is_blackbox:
         # Real detector output (text the detector generated) for this prompt,
         # the explanation's own re-runs, and the black-box-specific metrics.
-        minimal = xai.get("minimal_set") or []
         entry.update({
             "detector_output": defense_result.get("detector_output"),
             "detector_outputs": xai["detector_outputs"],
-            "blackbox_method": xai.get("method"),
             "granularity": xai.get("granularity"),
             "baseline": xai.get("baseline"),
             "baseline_value": xai.get("baseline_value"),
             "baseline_valid": xai.get("baseline_valid"),
             "deterministic": xai.get("deterministic"),
             "n_detector_calls": xai.get("n_detector_calls"),
-            "minimal_set_size": len(minimal) if minimal else None,
+            "n_samples": xai.get("n_samples"),
+            "efficiency_error": xai.get("efficiency_error"),
             "deletion_flip": deletion_flip(full_value, values, rescore_p, thresholds),
         })
-        if injected_span is not None and not skip_alignment:
-            entry["minimal_set_precision"] = minimal_set_precision(minimal, injected_span)
     # --attack none: nothing was injected, so the alignment metric is skipped.
-    # With a ddmin explanation every kept word has the same value, so the mass-based
-    # metric would only measure the first half of the set in text order: the
-    # black-box method reports `minimal_set_precision` instead.
     if injected_span is not None and not skip_alignment:
         entry["injected_span"] = injected_span
-        if not (is_blackbox and xai.get("method") == "ddmin"):
-            entry["injected_top_mass_precision"] = {
-                str(m): injected_top_mass_precision(values, injected_span, m) for m in alignment_masses
-            }
+        entry["injected_top_mass_precision"] = {
+            str(m): injected_top_mass_precision(values, injected_span, m) for m in alignment_masses
+        }
     return entry
 
 
@@ -884,20 +876,15 @@ def _aggregate(per_sample, thresholds, alignment_masses=(0.5,)):
     blackbox_extra = {}
     bb = [e for e in per_sample.values() if "deletion_flip" in e]
     if bb:
-        sizes = [e["minimal_set_size"] for e in bb if e.get("minimal_set_size")]
-        precisions = [e["minimal_set_precision"] for e in bb if e.get("minimal_set_precision") is not None]
         calls = [e["n_detector_calls"] for e in bb if e.get("n_detector_calls") is not None]
+        eff = [e["efficiency_error"] for e in bb if e.get("efficiency_error") is not None]
         blackbox_extra = {
             "deletion_flip_rate": mean_by_t("deletion_flip"),
-            "minimal_set_size": {
-                "n": len(sizes),
-                "mean": float(np.mean(sizes)) if sizes else None,
-                "median": float(np.median(sizes)) if sizes else None,
-            },
-            "minimal_set_precision": {
-                "n": len(precisions),
-                "mean": float(np.mean(precisions)) if precisions else None,
-                "median": float(np.median(precisions)) if precisions else None,
+            "efficiency_error": {
+                "n": len(eff),
+                "mean": float(np.mean(eff)) if eff else None,
+                "median": float(np.median(eff)) if eff else None,
+                "max": float(np.max(eff)) if eff else None,
             },
             "n_nondeterministic": sum(1 for e in bb if e.get("deterministic") is False),
             "n_detector_calls_mean": float(np.mean(calls)) if calls else None,
@@ -933,15 +920,14 @@ def _md_cell(text, limit=90) -> str:
 
 
 def _render_blackbox_report_sections(metrics_out, meta, agg) -> list:
-    """Report sections specific to `--xai blackbox`: conjunto mínimo, alinhamento,
+    """Report sections specific to `--xai blackbox`: Kernel SHAP cost/quality,
     outcomes (baseline inválido etc.) and the real detector output per sample."""
-    lines = ["", "## Conjunto mínimo (ddmin) e alinhamento", ""]
-    ms, mp = agg.get("minimal_set_size", {}), agg.get("minimal_set_precision", {})
-    lines += [
-        f"- Tamanho do conjunto mínimo (palavras): média {ms.get('mean')}, mediana {ms.get('median')} (n={ms.get('n')})",
-        (f"- Precisão do conjunto mínimo dentro do span injetado: média {mp.get('mean')}, mediana {mp.get('median')} "
-         f"(n={mp.get('n')})" if not meta.get("no_attack") else "- Precisão no span injetado: não há injeção."),
+    ee = agg.get("efficiency_error", {})
+    lines = [
+        "", "## Kernel SHAP sobre o rótulo binário (captum)", "",
         f"- Chamadas ao detector por amostra explicada (média): {agg.get('n_detector_calls_mean')}",
+        f"- Erro de eficiência |Σ valores − (f(x) − base)|: média {ee.get('mean')}, mediana {ee.get('median')}, "
+        f"máx {ee.get('max')} (n={ee.get('n')}); valores altos indicam `n_samples` baixo",
         f"- Amostras com geração não determinística: {agg.get('n_nondeterministic')}",
         "",
     ]
@@ -968,8 +954,8 @@ def _render_blackbox_report_sections(metrics_out, meta, agg) -> list:
         "",
         "Texto gerado pelo detector (até 10 tokens) em cada situação; `flag` = decisão depois da limpeza do eco.",
         "",
-        "| amostra | defesa (execução original) | contexto completo | baseline | só o conjunto mínimo | sem o conjunto mínimo |",
-        "|---|---|---|---|---|---|",
+        "| amostra | defesa (execução original) | contexto completo | baseline |",
+        "|---|---|---|---|",
     ]
     for idx, e in metrics_out["per_sample"].items():
         outs = e.get("detector_outputs") or {}
@@ -978,10 +964,7 @@ def _render_blackbox_report_sections(metrics_out, meta, agg) -> list:
             o = outs.get(key) or {}
             return f"{_md_cell(o.get('raw_output'))} ({'1' if o.get('flag') else '0'})" if o else "—"
 
-        lines.append(
-            f"| {idx} | {_md_cell(e.get('detector_output'))} | {cell('full')} | {cell('baseline')} | "
-            f"{cell('minimal_only')} | {cell('without_minimal')} |"
-        )
+        lines.append(f"| {idx} | {_md_cell(e.get('detector_output'))} | {cell('full')} | {cell('baseline')} |")
     lines.append("")
     return lines
 
@@ -1040,7 +1023,7 @@ def _render_report(metrics_out) -> str:
     ]
     if meta.get("no_attack"):
         lines += ["- Métrica de alinhamento (span injetado) não calculada: não há injeção.", ""]
-    elif not is_bb:
+    else:
         lines += [
             "## Alinhamento (span injetado)",
             "",
@@ -1170,8 +1153,7 @@ def _detector_outputs_html(sample, xai) -> str:
     if defense_result.get("detector_output") is not None:
         rows.append(("Defesa (execução original)",
                      {"raw_output": defense_result["detector_output"], "flag": bool(defense_result.get("detect_flag"))}))
-    for label, key in (("Contexto completo (reexecutado)", "full"), ("Baseline", "baseline"),
-                       ("Só o conjunto mínimo", "minimal_only"), ("Sem o conjunto mínimo", "without_minimal")):
+    for label, key in (("Contexto completo (reexecutado)", "full"), ("Baseline", "baseline")):
         if outs.get(key) is not None:
             rows.append((label, outs[key]))
     if not rows:
@@ -1271,12 +1253,13 @@ def _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples
         )
         if xai_method == "blackbox":
             # A boolean detector has no P(benign)/P(malign): show the method, the
-            # baseline check, the minimal set and the detector's real outputs instead.
+            # baseline check, the Kernel SHAP budget and the detector's real outputs instead.
             header = (
                 f"<h3>Sample {idx} — {status} — defense={defense} ({model_name}), attack={attack}, "
-                f"category={sample.get('category')}, método={xai.get('method')} ({xai.get('granularity')}), "
+                f"category={sample.get('category')}, método={xai.get('method')} ({xai.get('backend')}, "
+                f"n_samples={xai.get('n_samples')}), "
                 f"baseline={xai.get('baseline')} (detector={xai.get('baseline_value')}, válido={xai.get('baseline_valid')}), "
-                f"conjunto mínimo={len(xai.get('minimal_set') or [])} palavra(s), "
+                f"Σ valores={xai.get('sum_values')} (erro de eficiência={xai.get('efficiency_error')}), "
                 f"chamadas ao detector={xai.get('n_detector_calls')}, "
                 f"escala de cor ±{cmax if cmax else 'auto'}</h3>"
             ) + _detector_outputs_html(sample, xai)
@@ -1302,7 +1285,7 @@ def _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples
     _render_fidelity_acc_bars(per_sample, plots_dir)
     if xai_method == "blackbox":
         _render_deletion_curve(per_sample, plots_dir)
-    elif attack != "none":
+    if attack != "none":
         _render_alignment_histogram(per_sample, plots_dir, alignment_mass)
 
 
