@@ -71,13 +71,16 @@ import numpy as np
 
 from piarena.utils import save_json
 from piarena.xai.classifiers import resolve_classifier
+from piarena.xai.detectors import load_detector, resolve_detector
 from piarena.xai.metrics import (
     acc_at_1,
+    deletion_flip,
     fidelity,
     injected_top_mass_precision,
+    minimal_set_precision,
 )
 
-_XAI_METHODS = ("syntaxshap", "kernelshap", "ig")
+_XAI_METHODS = ("syntaxshap", "kernelshap", "ig", "blackbox")
 
 
 def parse_args():
@@ -167,12 +170,29 @@ def load_json(path):
         return json.load(f)
 
 
-def _load_explainer(xai_method: str, model_name: str, algorithm: str, trust_remote_code: bool = False):
+def _load_explainer(xai_method: str, model_name: str, algorithm: str, trust_remote_code: bool = False,
+                    detector_cfg: dict | None = None):
     """Returns `(explainer, make_rescorer)` — `make_rescorer(context)` builds
     a `rescore_fn(keep_mask) -> float` closure using exactly the masking
     mechanism the given method's own explainer uses. Deferred, heavy imports
     (torch/transformers/spacy/captum) — only paid once metrics actually run,
-    and only for whichever one method this call needs."""
+    and only for whichever one method this call needs.
+
+    `blackbox` (boolean detectors such as DataSentinel) loads the detector via
+    `detector_cfg` instead of a classifier; its `make_rescorer(context, xai)` also
+    takes the stored explanation (`wants_xai`), because the always-kept words of
+    the `clean_context` baseline live there."""
+    if xai_method == "blackbox":
+        from piarena.xai.blackbox.explainer import BlackBoxExplainer
+
+        explainer = BlackBoxExplainer(load_detector(detector_cfg))
+
+        def make_rescorer(context, xai=None):
+            return explainer.make_rescorer(context, xai)
+
+        make_rescorer.wants_xai = True
+        return explainer, make_rescorer
+
     if xai_method == "syntaxshap":
         from piarena.xai.syntaxshap.classifier_explainer import ClassifierSyntaxExplainer
         from piarena.xai.syntaxshap.xai_syntaxshap import _load_classifier_pipeline
@@ -211,11 +231,20 @@ def compute_one(sample, make_rescorer, thresholds, skip_alignment=False, alignme
     if xai is None or context is None:
         return None
 
+    # `blackbox` marks samples it could not explain (not flagged on re-run, invalid
+    # baseline, ...) with `explained: False`; they have no values to score.
+    if xai.get("explained") is False:
+        return None
+    is_blackbox = "detector_outputs" in xai
+
     values = xai["values"]
     full_value = xai["full_value"]
     injected_span = xai.get("injected_span")
 
-    rescore_p = make_rescorer(context)
+    if getattr(make_rescorer, "wants_xai", False):
+        rescore_p = make_rescorer(context, xai)
+    else:
+        rescore_p = make_rescorer(context)
 
     entry = {
         "predicted_label": xai.get("predicted_label"),
@@ -239,12 +268,35 @@ def compute_one(sample, make_rescorer, thresholds, skip_alignment=False, alignme
         # ever True for a syntaxshap sample that actually hit the timeout.
         "timed_out": bool(xai.get("timed_out", False)),
     }
+    if is_blackbox:
+        # Real detector output (text the detector generated) for this prompt,
+        # the explanation's own re-runs, and the black-box-specific metrics.
+        minimal = xai.get("minimal_set") or []
+        entry.update({
+            "detector_output": defense_result.get("detector_output"),
+            "detector_outputs": xai["detector_outputs"],
+            "blackbox_method": xai.get("method"),
+            "granularity": xai.get("granularity"),
+            "baseline": xai.get("baseline"),
+            "baseline_value": xai.get("baseline_value"),
+            "baseline_valid": xai.get("baseline_valid"),
+            "deterministic": xai.get("deterministic"),
+            "n_detector_calls": xai.get("n_detector_calls"),
+            "minimal_set_size": len(minimal) if minimal else None,
+            "deletion_flip": deletion_flip(full_value, values, rescore_p, thresholds),
+        })
+        if injected_span is not None and not skip_alignment:
+            entry["minimal_set_precision"] = minimal_set_precision(minimal, injected_span)
     # --attack none: nothing was injected, so the alignment metric is skipped.
+    # With a ddmin explanation every kept word has the same value, so the mass-based
+    # metric would only measure the first half of the set in text order: the
+    # black-box method reports `minimal_set_precision` instead.
     if injected_span is not None and not skip_alignment:
         entry["injected_span"] = injected_span
-        entry["injected_top_mass_precision"] = {
-            str(m): injected_top_mass_precision(values, injected_span, m) for m in alignment_masses
-        }
+        if not (is_blackbox and xai.get("method") == "ddmin"):
+            entry["injected_top_mass_precision"] = {
+                str(m): injected_top_mass_precision(values, injected_span, m) for m in alignment_masses
+            }
     return entry
 
 
@@ -600,14 +652,19 @@ def main():
 
     defense = _guess_defense(result, args.result)
     # No recorded defense (very old result file) -> promptguard, the only one it could be.
-    classifier = resolve_classifier(
-        defense or "promptguard", None if args.model_name == "auto" else {"model_name": args.model_name},
-    )
+    if xai_method == "blackbox":
+        # Boolean detector (e.g. DataSentinel), not a classifier: `resolve_classifier` would refuse it.
+        classifier = resolve_detector(defense or "datasentinel", None)
+    else:
+        classifier = resolve_classifier(
+            defense or "promptguard", None if args.model_name == "auto" else {"model_name": args.model_name},
+        )
     model_name = classifier["model_name"]
     _cuda_reset()
     t_load = time.perf_counter()
     explainer, make_rescorer = _load_explainer(
         xai_method, model_name, args.algorithm, classifier.get("trust_remote_code", False),
+        detector_cfg=classifier if xai_method == "blackbox" else None,
     )
     load_explainer_s = time.perf_counter() - t_load
 
@@ -637,6 +694,8 @@ def main():
     aggregate["asr_utility"] = _asr_utility_summary(result)
     aggregate["category_summary"] = _category_summary(result, per_sample, args.thresholds)
     aggregate["confusion_matrix"] = _confusion_matrix(result, attack)
+    if xai_method == "blackbox":
+        aggregate["blackbox_summary"] = _blackbox_summary(result)
 
     metrics_out = {
         "meta": {
@@ -754,6 +813,26 @@ def _log_to_wandb(metrics_out, per_sample, plots_dir, thresholds):
     wandb.finish()
 
 
+def _blackbox_summary(result: dict) -> dict:
+    """How the `blackbox` method fared over the whole raw result: per outcome
+    (`explained`, or the `skip_reason` — e.g. `baseline_invalid`, `not_flagged`)
+    plus how many samples carry the detector's real output."""
+    outcomes: dict = {}
+    for sample in result.values():
+        ctx = (sample.get("xai_result") or {}).get("context")
+        if ctx:
+            key = ctx.get("skip_reason") or "explained"
+            outcomes[key] = outcomes.get(key, 0) + 1
+    return {
+        "by_outcome": outcomes,
+        "n_baseline_invalid": outcomes.get("baseline_invalid", 0),
+        "n_with_detector_output": sum(
+            1 for s in result.values() if (s.get("defense_result") or {}).get("detector_output") is not None
+        ),
+        "n_samples": len(result),
+    }
+
+
 def _confusion_matrix(result: dict, attack: str) -> dict:
     """Confusion matrix over the WHOLE raw result (blocked or not, explained
     or not). Positive class = malign; predicted malign = blocked by the defense.
@@ -801,7 +880,31 @@ def _aggregate(per_sample, thresholds, alignment_masses=(0.5,)):
         }
     n_timed_out = sum(1 for e in per_sample.values() if e.get("timed_out"))
 
+    # Black-box (boolean detector) extras: present only when the entries carry them.
+    blackbox_extra = {}
+    bb = [e for e in per_sample.values() if "deletion_flip" in e]
+    if bb:
+        sizes = [e["minimal_set_size"] for e in bb if e.get("minimal_set_size")]
+        precisions = [e["minimal_set_precision"] for e in bb if e.get("minimal_set_precision") is not None]
+        calls = [e["n_detector_calls"] for e in bb if e.get("n_detector_calls") is not None]
+        blackbox_extra = {
+            "deletion_flip_rate": mean_by_t("deletion_flip"),
+            "minimal_set_size": {
+                "n": len(sizes),
+                "mean": float(np.mean(sizes)) if sizes else None,
+                "median": float(np.median(sizes)) if sizes else None,
+            },
+            "minimal_set_precision": {
+                "n": len(precisions),
+                "mean": float(np.mean(precisions)) if precisions else None,
+                "median": float(np.median(precisions)) if precisions else None,
+            },
+            "n_nondeterministic": sum(1 for e in bb if e.get("deterministic") is False),
+            "n_detector_calls_mean": float(np.mean(calls)) if calls else None,
+        }
+
     return {
+        **blackbox_extra,
         "fidelity_mean": mean_by_t("fidelity"),
         "acc_at_1_rate": mean_by_t("acc_at_1"),
         # {mass: {n_explained, mean, median}} of injected_top_mass_precision —
@@ -821,6 +924,68 @@ def _aggregate(per_sample, thresholds, alignment_masses=(0.5,)):
     }
 
 
+def _md_cell(text, limit=90) -> str:
+    """One-line, pipe-safe markdown table cell for model-generated text."""
+    if text is None:
+        return "—"
+    flat = " ".join(str(text).split()).replace("|", "\\|")
+    return "`" + (flat if len(flat) <= limit else flat[: limit - 1] + "…") + "`" if flat else "(vazio)"
+
+
+def _render_blackbox_report_sections(metrics_out, meta, agg) -> list:
+    """Report sections specific to `--xai blackbox`: conjunto mínimo, alinhamento,
+    outcomes (baseline inválido etc.) and the real detector output per sample."""
+    lines = ["", "## Conjunto mínimo (ddmin) e alinhamento", ""]
+    ms, mp = agg.get("minimal_set_size", {}), agg.get("minimal_set_precision", {})
+    lines += [
+        f"- Tamanho do conjunto mínimo (palavras): média {ms.get('mean')}, mediana {ms.get('median')} (n={ms.get('n')})",
+        (f"- Precisão do conjunto mínimo dentro do span injetado: média {mp.get('mean')}, mediana {mp.get('median')} "
+         f"(n={mp.get('n')})" if not meta.get("no_attack") else "- Precisão no span injetado: não há injeção."),
+        f"- Chamadas ao detector por amostra explicada (média): {agg.get('n_detector_calls_mean')}",
+        f"- Amostras com geração não determinística: {agg.get('n_nondeterministic')}",
+        "",
+    ]
+    summary = agg.get("blackbox_summary") or {}
+    if summary:
+        lines += [
+            "## Resultado do XAI por amostra (todo o resultado bruto)",
+            "",
+            "`baseline_invalid`: o detector já bloqueia o texto de referência (vazio/neutro), então não há "
+            "referência benigna e a amostra fica fora das médias.",
+            "",
+            "| resultado | amostras |",
+            "|---|---|",
+        ]
+        lines += [f"| {k} | {v} |" for k, v in sorted(summary["by_outcome"].items())]
+        lines += [
+            "",
+            f"- Amostras com a saída real do detector registrada em `defense_result`: "
+            f"{summary['n_with_detector_output']}/{summary['n_samples']}",
+            "",
+        ]
+    lines += [
+        "## Saída real do detector (amostras explicadas)",
+        "",
+        "Texto gerado pelo detector (até 10 tokens) em cada situação; `flag` = decisão depois da limpeza do eco.",
+        "",
+        "| amostra | defesa (execução original) | contexto completo | baseline | só o conjunto mínimo | sem o conjunto mínimo |",
+        "|---|---|---|---|---|---|",
+    ]
+    for idx, e in metrics_out["per_sample"].items():
+        outs = e.get("detector_outputs") or {}
+
+        def cell(key):
+            o = outs.get(key) or {}
+            return f"{_md_cell(o.get('raw_output'))} ({'1' if o.get('flag') else '0'})" if o else "—"
+
+        lines.append(
+            f"| {idx} | {_md_cell(e.get('detector_output'))} | {cell('full')} | {cell('baseline')} | "
+            f"{cell('minimal_only')} | {cell('without_minimal')} |"
+        )
+    lines.append("")
+    return lines
+
+
 def _render_report(metrics_out) -> str:
     meta = metrics_out["meta"]
     agg = metrics_out["aggregate"]
@@ -829,6 +994,7 @@ def _render_report(metrics_out) -> str:
         title += f" ({meta['algorithm']})"
     title += f" ({meta['model_name']})"
     n_blocked_expl = sum(1 for e in metrics_out["per_sample"].values() if e.get("detect_flag") is True)
+    is_bb = meta["xai_method"] == "blackbox"
     lines = [
         title,
         "",
@@ -842,16 +1008,19 @@ def _render_report(metrics_out) -> str:
         f"{agg['timed_out']['n']}/{meta['n_samples']} "
         f"({agg['timed_out']['rate']:.0%})" if agg['timed_out']['rate'] is not None else "- Timed out: n/a",
         "",
-        "## Fidelity(t) / acc@1",
+        ("## Fidelity(t) e deleção (detector booleano: acc@1 = 1 − Fidelity, omitido)" if is_bb
+         else "## Fidelity(t) / acc@1"),
         "",
-        "| t | Fidelity (lower=better) | acc@1 |",
+        ("| t | Fidelity (menor=melhor) | deleção: % que deixou de ser bloqueada |" if is_bb
+         else "| t | Fidelity (lower=better) | acc@1 |"),
         "|---|---|---|",
     ]
     for t in meta["thresholds"]:
         key = str(t)
-        lines.append(
-            f"| {t} | {agg['fidelity_mean'].get(key)} | {agg['acc_at_1_rate'].get(key)} |"
-        )
+        second = agg.get("deletion_flip_rate", {}).get(key) if is_bb else agg["acc_at_1_rate"].get(key)
+        lines.append(f"| {t} | {agg['fidelity_mean'].get(key)} | {second} |")
+    if is_bb:
+        lines += _render_blackbox_report_sections(metrics_out, meta, agg)
     cm = agg["confusion_matrix"]
     lines += [
         "",
@@ -871,7 +1040,7 @@ def _render_report(metrics_out) -> str:
     ]
     if meta.get("no_attack"):
         lines += ["- Métrica de alinhamento (span injetado) não calculada: não há injeção.", ""]
-    else:
+    elif not is_bb:
         lines += [
             "## Alinhamento (span injetado)",
             "",
@@ -989,6 +1158,61 @@ def _mark_injected_span(html: str, injected_span: dict | None) -> str:
     return _TOKEN_DIV_RE.sub(repl, html)
 
 
+def _detector_outputs_html(sample, xai) -> str:
+    """"Saída real do detector" block for the saliency map of a `blackbox`
+    sample: the text the detector generated in the defense's own run and in the
+    explanation's re-runs. Model-generated text is HTML-escaped."""
+    import html
+
+    defense_result = sample.get("defense_result") or {}
+    outs = (xai or {}).get("detector_outputs") or {}
+    rows = []
+    if defense_result.get("detector_output") is not None:
+        rows.append(("Defesa (execução original)",
+                     {"raw_output": defense_result["detector_output"], "flag": bool(defense_result.get("detect_flag"))}))
+    for label, key in (("Contexto completo (reexecutado)", "full"), ("Baseline", "baseline"),
+                       ("Só o conjunto mínimo", "minimal_only"), ("Sem o conjunto mínimo", "without_minimal")):
+        if outs.get(key) is not None:
+            rows.append((label, outs[key]))
+    if not rows:
+        return ""
+    warn = ""
+    original = defense_result.get("detector_output")
+    rerun = (outs.get("full") or {}).get("raw_output")
+    if (original is not None and rerun is not None and original != rerun) or (xai or {}).get("deterministic") is False:
+        warn = ("<p style='color:#b3202f'><b>Aviso:</b> a geração do detector não foi determinística "
+                "(a mesma entrada produziu saídas diferentes).</p>")
+    body = "".join(
+        f"<tr><td style='padding:2px 12px 2px 0'>{html.escape(label)}</td>"
+        f"<td style='padding:2px 12px 2px 0'><code>{html.escape(str(o.get('raw_output')))}</code></td>"
+        f"<td>flag={int(bool(o.get('flag')))}</td></tr>"
+        for label, o in rows
+    )
+    return f"<div><b>Saída real do detector</b>{warn}<table style='font-size:13px'>{body}</table></div>"
+
+
+def _render_deletion_curve(per_sample, plots_dir):
+    """Fraction of explained samples that stop being blocked after deleting the
+    top-t% words by |value| (`--xai blackbox`)."""
+    import matplotlib.pyplot as plt
+
+    thresholds = sorted({t for e in per_sample.values() for t in e.get("deletion_flip", {})}, key=float)
+    if not thresholds:
+        return
+    rates = []
+    for t in thresholds:
+        vals = [e["deletion_flip"][t] for e in per_sample.values() if e.get("deletion_flip", {}).get(t) is not None]
+        rates.append(float(np.mean(vals)) if vals else 0.0)
+    fig, ax = plt.subplots()
+    ax.plot([float(t) for t in thresholds], rates, marker="o")
+    ax.set_ylim(0, 1.05)
+    ax.set_xlabel("t (top-t% words deleted)")
+    ax.set_ylabel("fraction no longer blocked")
+    ax.set_title("Deletion curve — blocked samples (higher = more faithful)")
+    fig.savefig(os.path.join(plots_dir, "deletion_curve.png"), bbox_inches="tight")
+    plt.close(fig)
+
+
 def _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples=None,
                   defense=None, model_name=None, alignment_mass=0.5, cmax=None):
     import shap  # official shap package — plotting only, not computation
@@ -1015,6 +1239,18 @@ def _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples
         # block, so `or {}` is needed here too.
         xai = (sample.get("xai_result") or {}).get("context")
         defense_result = sample.get("defense_result", {})
+        if xai_method == "blackbox" and (xai is None or xai.get("explained") is False):
+            # No map (not blocked / baseline invalid / ...), but the detector's real
+            # output for this prompt is still shown.
+            outputs = _detector_outputs_html(sample, xai)
+            if outputs:
+                import html as _html
+                reason = (xai or {}).get("skip_reason") or "não bloqueada, nada a explicar"
+                sample_blocks.append(
+                    f"<h3>Sample {idx} — {'BLOQUEADO' if defense_result.get('detect_flag') else 'NÃO BLOQUEADO'} — "
+                    f"sem mapa ({_html.escape(str(reason))}), category={sample.get('category')}</h3>{outputs}"
+                )
+            continue
         if xai is None or not xai.get("values"):
             continue
         explanation = shap.Explanation(
@@ -1033,6 +1269,17 @@ def _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples
             f"detect_flag={blocked}, "
             f"P(benign)={p_benign}, P(malign)={p_malign}, escala de cor ±{cmax if cmax else 'auto'}</h3>"
         )
+        if xai_method == "blackbox":
+            # A boolean detector has no P(benign)/P(malign): show the method, the
+            # baseline check, the minimal set and the detector's real outputs instead.
+            header = (
+                f"<h3>Sample {idx} — {status} — defense={defense} ({model_name}), attack={attack}, "
+                f"category={sample.get('category')}, método={xai.get('method')} ({xai.get('granularity')}), "
+                f"baseline={xai.get('baseline')} (detector={xai.get('baseline_value')}, válido={xai.get('baseline_valid')}), "
+                f"conjunto mínimo={len(xai.get('minimal_set') or [])} palavra(s), "
+                f"chamadas ao detector={xai.get('n_detector_calls')}, "
+                f"escala de cor ±{cmax if cmax else 'auto'}</h3>"
+            ) + _detector_outputs_html(sample, xai)
         try:
             body = shap.plots.text(explanation, display=False, **({"cmax": cmax} if cmax else {}))
             body = _fix_numpy_scalar_colors(body)
@@ -1053,7 +1300,9 @@ def _render_plots(result, per_sample, plots_dir, xai_method, attack, max_samples
     print(f"Wrote {os.path.join(plots_dir, 'saliency_maps.html')} ({n} sample(s))")
 
     _render_fidelity_acc_bars(per_sample, plots_dir)
-    if attack != "none":
+    if xai_method == "blackbox":
+        _render_deletion_curve(per_sample, plots_dir)
+    elif attack != "none":
         _render_alignment_histogram(per_sample, plots_dir, alignment_mass)
 
 

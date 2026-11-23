@@ -17,7 +17,7 @@ from piarena.utils import save_json, load_json, setup_seeds, nice_print
 from piarena.llm import Model
 from piarena.attacks import get_attack
 from piarena.defenses import get_defense
-from piarena.xai import get_xai
+from piarena.xai import get_xai, XAI_CLASSES
 from piarena.xai.classifiers import resolve_classifier
 from piarena.evaluations import (
     llm_judge, open_prompt_injection_utility,
@@ -175,6 +175,10 @@ def main(args):
         # --defense piguard), not the plugin's default model; an explicit
         # `model_name` in xai_config still wins.
         xai_config = resolve_classifier(args.defense, xai_config)
+    elif args.xai:
+        # Other plugins adapt their own config to the defense (identity by
+        # default; `blackbox` picks the boolean-detector adapter).
+        xai_config = XAI_CLASSES.get(args.xai).resolve_config(args.defense, xai_config)
     xai = get_xai(args.xai, config=xai_config) if args.xai else None
     if xai is not None:
         print(f"Initialized XAI method: {xai} (config: {xai.config})")

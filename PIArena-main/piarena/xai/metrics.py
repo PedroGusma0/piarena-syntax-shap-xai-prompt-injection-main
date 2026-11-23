@@ -127,3 +127,40 @@ def injected_top_mass_precision(
 # no second variant left to compare against. `scripts/xai_metrics.py`'s
 # `--result-w` flag and the `syntax_vs_syntax_w_spearman` fields were removed
 # with it.
+
+
+# ---------------------------------------------------------------------------
+# Black-box (boolean detector) metrics — used by `--xai blackbox`.
+#
+# With a 0/1 `rescore_fn` (the detector's own decision), Fidelity(t) is 0/1
+# per sample and acc@1(t) == 1 - Fidelity(t) exactly, so the two carry the
+# same information there. These metrics are the ones that add something:
+# the deletion test (necessity), the size of the minimal set (sparsity) and
+# how much of it lies inside the injected span.
+# ---------------------------------------------------------------------------
+
+def deletion_flip(
+    full_value: float,
+    values: Sequence[float],
+    rescore_fn: Callable[[np.ndarray], float],
+    thresholds: Sequence[float] = (0.1, 0.2, 0.3, 0.5),
+) -> dict:
+    """Deletion test: delete the top-t% words by |value| and re-run the
+    detector. `out[str(t)]` is True when the sample is no longer flagged
+    (the explanation pointed at words the decision truly depends on). Only
+    meaningful for samples that were flagged in full (`full_value >= 0.5`)."""
+    out = {}
+    for t in thresholds:
+        keep_mask = ~top_t_mask(values, t)
+        out[str(t)] = bool(full_value >= 0.5 and rescore_fn(keep_mask) < 0.5)
+    return out
+
+
+def minimal_set_precision(minimal_set: Sequence[int], injected_span: Optional[dict]) -> Optional[float]:
+    """Fraction of the minimal set's words that lie inside `injected_span`.
+    None without a span or with an empty set."""
+    if not injected_span or not minimal_set:
+        return None
+    start, end = injected_span["start_token"], injected_span["end_token"]
+    inside = sum(1 for i in minimal_set if start <= i < end)
+    return float(inside / len(minimal_set))

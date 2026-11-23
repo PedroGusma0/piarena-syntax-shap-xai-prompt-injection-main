@@ -8,6 +8,7 @@ from ..registry import XAI_REGISTRY
 from . import syntaxshap  # noqa: F401
 from . import kernelshap  # noqa: F401
 from . import ig  # noqa: F401
+from . import blackbox  # noqa: F401
 
 # Registry is auto-populated by @register_xai decorators
 XAI_CLASSES = XAI_REGISTRY

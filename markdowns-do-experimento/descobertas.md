@@ -250,3 +250,7 @@ Tempo médio por amostra: 0,13 s (dolly_closed_qa) → 0,37 s (information_extra
 ## Pendente: Integrated Gradients
 
 Nenhum achado ainda. O `--xai ig` foi implementado, mas não rodou com o Prompt-Guard-86M (gated, sem GPU). Após a primeira rodada, registrar aqui: `ig_convergence_delta` típico, concordância de ranking com o KernelSHAP e o SyntaxSHAP, e a fidelidade. Ver [[ig-adaptacao-encoder-classifier]].
+
+## Pendente: DataSentinel (`--xai blackbox`)
+
+Nenhum achado ainda. O plugin `blackbox` foi implementado e testado só com detectores fictícios (CPU); não rodou com o Mistral/DataSentinel real. Após a primeira rodada, registrar aqui: fração de amostras com `baseline_valid`, amostras não determinísticas, tamanho típico do conjunto mínimo, `minimal_set_precision`, taxa de deleção e o texto que o detector gera nas amostras bloqueadas e nas que passam. Ver [[datasentinel-blackbox-detect-flag]].

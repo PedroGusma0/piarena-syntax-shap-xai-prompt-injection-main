@@ -70,7 +70,7 @@ from . import my_defense  # noqa: F401
 
 ## Add A New XAI Method
 
-Third plugin type (`XAI_REGISTRY`, `piarena/registry.py`), added to explain defense decisions — see `piarena/xai/syntaxshap/` and `plans/xai-syntaxshap-promptguard.md` for a full worked example (SyntaxSHAP adapted for the `promptguard` classifier), or `piarena/xai/kernelshap/` and `plans/xai-kernelshap-promptguard.md` for a second, independent one (Kernel SHAP adapted for the same classifier) — both coexist in the same `XAI_REGISTRY`, selected via `--xai`.
+Third plugin type (`XAI_REGISTRY`, `piarena/registry.py`), added to explain defense decisions — see `piarena/xai/syntaxshap/` and `plans/xai-syntaxshap-promptguard.md` for a full worked example (SyntaxSHAP adapted for the `promptguard` classifier), or `piarena/xai/kernelshap/` and `plans/xai-kernelshap-promptguard.md` for a second, independent one (Kernel SHAP adapted for the same classifier) — both coexist in the same `XAI_REGISTRY`, selected via `--xai`. For a detection defense that is not a classifier (no logits, only a `detect_flag` — e.g. `datasentinel`), see `piarena/xai/blackbox/` and `plans/xai-blackbox-datasentinel.md`: write a `BooleanDetector` adapter and register it in `piarena/xai/detectors.py`.
 
 Create a file such as `piarena/xai/my_xai/xai_my_xai.py`:
 

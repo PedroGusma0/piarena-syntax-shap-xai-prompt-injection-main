@@ -24,6 +24,14 @@ class BaseXAI(ABC):
     def __init__(self, config: dict = None):
         self.config = {**self.DEFAULT_CONFIG, **(config or {})}
 
+    @classmethod
+    def resolve_config(cls, defense_name: str, config: dict = None) -> dict:
+        """Hook `main.py` calls with the `--defense` name and the user's
+        `xai_config`, to let a plugin adapt its config to the defense being
+        explained (e.g. `blackbox` picks the detector adapter). Identity by
+        default, so existing plugins behave exactly as before."""
+        return config
+
     EXPLAIN_SCOPES = ("auto", "blocked", "all")
 
     def should_explain(self, detect_flag, attack_name=None) -> bool:

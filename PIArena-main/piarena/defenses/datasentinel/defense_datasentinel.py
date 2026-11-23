@@ -39,8 +39,13 @@ class DataSentinelDefense(BaseDefense):
 
     def execute(self, target_inst, context):
         self._ensure_detector()
-        detect_flag = self._detector.detect(context)
-        return {"detect_flag": detect_flag}
+        verdict = self._detector.detect_verbose(context)
+        # `detect_flag` is a bool (the detector itself returns 1/0): main.py and
+        # scripts/xai_metrics.py count blocked samples with `is True`/`is False`,
+        # which an int would silently fail. `detector_output` is the text the
+        # model actually generated -- recorded for every sample (see
+        # plans/xai-blackbox-datasentinel.md).
+        return {"detect_flag": bool(verdict["flag"]), "detector_output": verdict["raw_output"]}
 
     def execute_batch(self, target_insts: List[str], contexts: List[str]) -> List[dict]:
         self._validate_batch_inputs(target_insts, contexts)
@@ -48,9 +53,11 @@ class DataSentinelDefense(BaseDefense):
         detector = self._detector
         if hasattr(detector, "batch_detect"):
             detect_flags = detector.batch_detect(contexts)
-        else:
-            detect_flags = [detector.detect(context) for context in contexts]
-        return [{"detect_flag": detect_flag} for detect_flag in detect_flags]
+            return [{"detect_flag": bool(detect_flag)} for detect_flag in detect_flags]
+        verdicts = [detector.detect_verbose(context) for context in contexts]
+        return [
+            {"detect_flag": bool(v["flag"]), "detector_output": v["raw_output"]} for v in verdicts
+        ]
 
     def get_response(self, target_inst, context, llm,
                      system_prompt="You are a helpful assistant."):
