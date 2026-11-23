@@ -3,7 +3,7 @@
 # por fase (attack, piguard, xai) e o perturbations_per_eval usado. Depois roda xai_metrics.py.
 # Saídas: <out>/xai_metrics/<stem>_latency.json (com run.perturbations_per_eval) + <out>/latency.{json,txt}.
 # Uso: bash scripts/run_kernelshap_captum_piguard_gov_report_long_none_latency.sh
-#      PPE=16 LIMIT=3 bash scripts/<este>.sh   (PPE = perturbations_per_eval, default 2; LIMIT = smoke test)
+#      PPE=16 LIMIT=3 bash scripts/<este>.sh   (PPE = perturbations_per_eval, default 1; LIMIT = smoke test)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -13,7 +13,7 @@ DEFENSE=piguard
 XAI=kernelshap
 BACKEND_LLM=${BACKEND_LLM:-Qwen/Qwen3-4B-Instruct-2507}
 SEED=${SEED:-42}
-PPE=${PPE:-2}
+PPE=${PPE:-1}
 NAME=kernelshap_captum_piguard_latency_${DATASET}_${ATTACK}_ppe${PPE}
 LIMIT_ARGS=()
 [ -n "${LIMIT:-}" ] && LIMIT_ARGS=(--limit "$LIMIT")
